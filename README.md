@@ -58,15 +58,7 @@ BASE_URL=https://your-openai-compatible-endpoint/v1
 
 如果 s11 使用备用模型，再设置 `FALLBACK_MODEL_ID`。不要提交真实 `.env`。
 
-## 学习路径
 
-```mermaid
-flowchart LR
-    A["s01 Agent Loop"] --> B["s02 Tools"] --> C["s03 Permission"] --> D["s04 Hooks"]
-    D --> E["s05 Todo"] --> F["s06 Subagent"] --> G["s07 Skills"]
-    G --> H["s08 Compact"] --> I["s09 Memory"] --> J["s10 Prompt"] --> K["s11 Recovery"]
-    K -. 尚未实现 .-> L["s12-s20"]
-```
 
 ## 全部章节
 
