@@ -1,0 +1,27 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Agent runtime output
+.memory/
+.transcripts/
+.task_outputs/
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
