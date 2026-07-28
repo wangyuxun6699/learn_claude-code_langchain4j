@@ -50,7 +50,9 @@ agent = create_agent(
 
 ## 本章文件
 
-`code.py` 是本章现有 LangChain 实现。
+- `code.py`：当前主版本。
+- `code_commented.py`：详细注释版，解释动态上下文采集、分段提示词、缓存与中间件调用时机。
+- `code_uncommented.py`：与主版本一致的无注释版。
 
 ---
 

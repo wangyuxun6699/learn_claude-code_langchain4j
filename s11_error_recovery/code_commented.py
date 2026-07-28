@@ -116,6 +116,7 @@ _prompt_cache_lock = RLock()
 
 def assemble_system_prompt(context: dict[str, Any]) -> str:
     """按当前工具、工作目录和记忆内容组装 system prompt。"""
+    # 固定段落先加入列表；动态段落只在有记忆时追加，避免无内容标题占 token。
     sections = [
         PROMPT_SECTIONS["identity"],
         PROMPT_SECTIONS["tools"].format(
@@ -135,6 +136,7 @@ def get_system_prompt(context: dict[str, Any]) -> str:
     """上下文不变时复用上一次 prompt，避免重复拼装。"""
     global _last_context_key, _last_prompt
 
+    # sort_keys 保证字典顺序不同但内容相同时命中同一个缓存。
     context_key = json.dumps(
         context,
         sort_keys=True,
@@ -143,6 +145,7 @@ def get_system_prompt(context: dict[str, Any]) -> str:
     )
 
     with _prompt_cache_lock:
+        # 第一次调用时 _last_prompt 为 None，不能把空缓存误当成命中。
         if context_key == _last_context_key and _last_prompt is not None:
             print("  \033[90m[cache hit] system prompt unchanged\033[0m")
             return _last_prompt
@@ -173,11 +176,13 @@ def build_prompt_context(request: ModelRequest[Any]) -> dict[str, Any]:
     """从真实 ModelRequest 中派生 prompt 所需的运行时上下文。"""
     memories = ""
     try:
+        # 记忆是增强信息；文件缺失或权限问题不应阻塞主 Agent。
         if MEMORY_INDEX.is_file():
             memories = MEMORY_INDEX.read_text(encoding="utf-8").strip()
     except OSError as exc:
         print(f"  \033[33m[memory unavailable] {exc}\033[0m")
 
+    # request.tools 是此刻真实绑定的工具，而不是全局 TOOLS 的猜测。
     enabled_tools = sorted({get_tool_name(item) for item in request.tools})
     return {
         "enabled_tools": enabled_tools,
@@ -204,6 +209,7 @@ def safe_path(raw_path: str) -> Path:
 def run_bash(command: str) -> str:
     """Run a shell command in the workspace and return stdout plus stderr."""
     try:
+        # shell 输出全部捕获并合并；工具 Hook 可在真正执行前实施权限控制。
         result = subprocess.run(
             command,
             shell=True,
@@ -214,6 +220,7 @@ def run_bash(command: str) -> str:
             timeout=120,
         )
         output = (result.stdout + result.stderr).strip()
+        # 限制单个 ToolMessage 体积，真正的上下文压缩由 s08 负责。
         return output[:50_000] if output else "(no output)"
     except subprocess.TimeoutExpired:
         return "Error: command timed out after 120 seconds"
@@ -225,6 +232,7 @@ def run_bash(command: str) -> str:
 def run_read(path: str, limit: int | None = None) -> str:
     """Read a UTF-8 text file inside the workspace."""
     try:
+        # limit 只影响模型看到的文本，不改变磁盘文件。
         lines = safe_path(path).read_text(encoding="utf-8").splitlines()
         if limit is not None and 0 <= limit < len(lines):
             omitted = len(lines) - limit
@@ -239,6 +247,7 @@ def run_write(path: str, content: str) -> str:
     """Write UTF-8 text to a file inside the workspace."""
     try:
         file_path = safe_path(path)
+        # 允许一次写入新建嵌套目录；safe_path 已先完成边界校验。
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
         return f"Wrote {len(content.encode('utf-8'))} bytes to {path}"
@@ -251,6 +260,7 @@ TOOLS = [run_bash, run_read, run_write]
 
 def build_model(model_id: str) -> ChatOpenAI:
     """创建模型，并关闭 SDK 内建重试，避免与教学恢复层重复重试。"""
+    # max_tokens 会在中间件 request.model_settings 中动态传入，因此这里不固定输出额度。
     return ChatOpenAI(
         model=model_id,
         api_key=API_KEY,
@@ -283,6 +293,7 @@ class RecoveryAgentState(AgentState[Any]):
 
 def initial_recovery_state() -> RecoveryData:
     """为每条新用户请求创建独立的恢复计数器。"""
+    # current_model 保存逻辑名称而非客户端对象，便于序列化进 LangGraph state。
     return {
         "has_escalated": False,
         "max_tokens": DEFAULT_MAX_TOKENS,
@@ -299,6 +310,7 @@ def exception_status_code(exc: Exception) -> int | None:
     if isinstance(status, int):
         return status
 
+    # OpenAI SDK 常把状态码放在 response.status_code，而不是异常顶层。
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
     return status if isinstance(status, int) else None
@@ -307,6 +319,7 @@ def exception_status_code(exc: Exception) -> int | None:
 def exception_text(exc: Exception) -> str:
     """合并不同 OpenAI-compatible SDK 常见的错误字段。"""
     parts = [type(exc).__name__, str(exc)]
+    # code/body/message 分别出现在不同兼容网关的异常对象中，全部纳入分类文本。
     for name in ("code", "body", "message"):
         value = getattr(exc, name, None)
         if value is not None:
@@ -357,16 +370,19 @@ def retry_after_seconds(exc: Exception) -> float | None:
     if headers is None:
         return None
 
+    # httpx Headers 通常大小写不敏感，但普通 dict 测试需兼容两种常见形式。
     value = headers.get("retry-after") or headers.get("Retry-After")
     if value is None:
         return None
 
+    # 第一种格式是纯秒数；0 也合法，不能用非零判断。
     try:
         return max(0.0, float(value))
     except (TypeError, ValueError):
         pass
 
     try:
+        # 第二种格式是 HTTP-date；统一到 UTC 再与当前时间相减。
         retry_at = parsedate_to_datetime(str(value))
         if retry_at.tzinfo is None:
             retry_at = retry_at.replace(tzinfo=timezone.utc)
@@ -385,12 +401,14 @@ def retry_delay(attempt: int, retry_after: float | None = None) -> float:
 
 def response_hit_output_limit(response: ModelResponse[Any]) -> bool:
     """从 OpenAI/Anthropic 风格响应元数据中识别输出截断。"""
+    # 只检查 AIMessage；ToolMessage 的长度不代表模型输出被截断。
     for message in reversed(response.result):
         if not isinstance(message, AIMessage):
             continue
 
         metadata = message.response_metadata or {}
         additional = message.additional_kwargs or {}
+        # 不同适配器可能把 finish/stop reason 放在不同元数据层级。
         reason = (
             metadata.get("finish_reason")
             or metadata.get("stop_reason")
@@ -406,6 +424,7 @@ def response_hit_output_limit(response: ModelResponse[Any]) -> bool:
         }:
             return True
 
+        # Responses API 常用 incomplete_details.reason 表达 max_output_tokens。
         incomplete = metadata.get("incomplete_details") or additional.get(
             "incomplete_details"
         )
@@ -418,7 +437,9 @@ def response_hit_output_limit(response: ModelResponse[Any]) -> bool:
 def reactive_compact(messages: list[AnyMessage]) -> list[AnyMessage]:
     """教学版紧急裁剪：保留最后 5 条，并移除开头孤立的 ToolMessage。"""
     print("  \033[31m[reactive compact] trimming to last 5 messages\033[0m")
+    # 复制尾部后再修正，避免直接删除调用方的历史列表。
     tail = list(messages[-5:])
+    # 孤立 ToolMessage 缺少发起它的 AIMessage，会被 provider 判为非法消息序列。
     while tail and isinstance(tail[0], ToolMessage):
         tail.pop(0)
     return [
@@ -453,10 +474,12 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
     ) -> dict[str, Any]:
         # before_agent 每次 agent.stream/invoke 只执行一次。
         # 因此工具循环会沿用计数器，而下一条用户请求会自动重置。
+        # 同一 stream 内的工具循环不会再次执行；下一用户回合才会重置。
         return {"recovery": initial_recovery_state()}
 
     def _selected_model(self, recovery: RecoveryData) -> ChatOpenAI:
         """根据恢复状态选择主模型或备用模型。"""
+        # fallback 未配置时，即使外部 state 写错，也安全回到主模型。
         if recovery["current_model"] == "fallback" and self.fallback_model:
             return self.fallback_model
         return self.primary_model
@@ -468,12 +491,14 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
         recovery: RecoveryData,
     ) -> ModelResponse[Any]:
         """处理 429/529；MAX_RETRIES 表示初始调用之外的最大重试次数。"""
+        # ModelRequest 使用不可变 override 模式，切换模型只替换当前重试副本。
         current_request = request
         last_error: Exception | None = None
 
         for retry_number in range(MAX_RETRIES + 1):
             try:
                 response = handler(current_request)
+                # 任意成功响应都会打断连续过载计数。
                 recovery["consecutive_529"] = 0
                 return response
             except Exception as exc:
@@ -484,6 +509,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
                     raise
 
                 if overloaded:
+                    # 只有 529 增加该计数；429 会在 else 中清零。
                     recovery["consecutive_529"] += 1
                     if recovery["consecutive_529"] >= MAX_CONSECUTIVE_529:
                         # 只有连续三次 529 才降级；429 会打断连续计数。
@@ -492,6 +518,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
                             and recovery["current_model"] != "fallback"
                         ):
                             recovery["current_model"] = "fallback"
+                            # 后续重试改用备用模型，原始 request 仍保持不变。
                             current_request = current_request.override(
                                 model=self.fallback_model
                             )
@@ -517,6 +544,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
                     break
 
                 # Retry-After 存在时会覆盖本地计算的退避时间。
+                # 服务端 Retry-After 优先，否则计算 0.5s 起步的指数退避。
                 delay = retry_delay(retry_number, retry_after_seconds(exc))
                 label = "529 overloaded" if overloaded else "429 rate limit"
                 print(
@@ -538,6 +566,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
     ) -> ExtendedModelResponse[Any]:
         """把中间续写消息和 recovery 状态一起写回 LangGraph。"""
 
+        # add_messages 默认追加；压缩场景必须先清空旧历史。
         if history_replaced:
             # add_messages 是追加型 reducer；先发 REMOVE_ALL_MESSAGES 才能真正
             # 用压缩后的 working_messages 替换旧历史。
@@ -552,6 +581,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
                 *response.result,
             ]
 
+        # working_messages 包含重试期间的部分输出/续写提示，response 是最后结果。
         normalized = ModelResponse(
             result=result,
             structured_response=response.structured_response,
@@ -586,6 +616,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
         """拦截一次模型节点，并在内部完成恢复后再把结果交还 Agent。"""
 
         # state 可能来自首次调用，也可能来自一次工具执行后的下一轮。
+        # 首次模型调用可能没有 recovery，用初始值补齐所有字段。
         stored_recovery = request.state.get("recovery") or {}
         recovery: RecoveryData = {
             **initial_recovery_state(),
@@ -598,6 +629,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
         while True:
             # model_settings 会由 create_agent 传入 bind_tools/bind，因此可在
             # 不重建 ChatOpenAI 客户端的情况下动态调整输出额度。
+            # settings 会传给 bind_tools/bind，无需为了输出额度重新构造客户端。
             settings = {
                 **request.model_settings,
                 "max_tokens": int(recovery["max_tokens"]),
@@ -615,9 +647,11 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
                     recovery,
                 )
             except Exception as exc:
+                # 只有明确上下文超限才进入裁剪；认证和网络错误不会被误吞。
                 # 路径 2：上下文过长只允许裁剪并重试一次，防止无限循环。
                 if is_prompt_too_long_error(exc):
                     if not recovery["has_attempted_reactive_compact"]:
+                        # 应急裁剪最多一次，防止“仍然太长”导致无限循环。
                         working_messages = reactive_compact(working_messages)
                         recovery["has_attempted_reactive_compact"] = True
                         history_replaced = True
@@ -649,6 +683,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
             if response_hit_output_limit(response):
                 # 路径 1a：第一次截断不保存残缺答案，直接用 64K 重做。
                 if not recovery["has_escalated"]:
+                    # 第一次丢弃残缺结果，以更高上限重做完全相同的请求。
                     recovery["has_escalated"] = True
                     recovery["max_tokens"] = ESCALATED_MAX_TOKENS
                     print(
@@ -659,6 +694,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
 
                 if recovery["recovery_count"] < MAX_RECOVERY_RETRIES:
                     # 路径 1b：64K 仍截断时，保留已生成内容并注入续写提示。
+                    # 后续截断保留已生成部分，下一次模型才能从中间继续。
                     working_messages.extend(response.result)
                     working_messages.append(HumanMessage(content=CONTINUATION_PROMPT))
                     recovery["recovery_count"] += 1
@@ -670,6 +706,7 @@ class ErrorRecoveryMiddleware(AgentMiddleware[RecoveryAgentState, None, Any]):
 
                 print("  \033[31m[max_tokens] recovery limit reached\033[0m")
 
+            # 正常完成或达到恢复上限都通过同一出口写回消息与状态。
             return self._finalize(
                 response,
                 recovery,
@@ -694,10 +731,12 @@ def content_to_text(content: Any) -> str:
     """把字符串或多模态文本块统一为终端可打印文本。"""
     if isinstance(content, str):
         return content
+    # 未知 provider 对象保留字符串形式，方便诊断而不是静默丢弃。
     if not isinstance(content, list):
         return str(content)
 
     texts: list[str] = []
+    # 兼容字符串块、OpenAI 字典块和带 .text 的 LangChain 对象块。
     for block in content:
         if isinstance(block, str):
             texts.append(block)
@@ -710,6 +749,7 @@ def content_to_text(content: Any) -> str:
 
 def print_message(message: AnyMessage) -> None:
     """打印模型文本、工具调用摘要和工具结果。"""
+    # AIMessage 可同时有自然语言和结构化 tool_calls，两部分都要显示。
     if isinstance(message, AIMessage):
         for tool_call in message.tool_calls:
             print(
@@ -734,12 +774,14 @@ def agent_loop(session_state: RecoveryAgentState) -> None:
     """消费 LangGraph 状态流，并把最终状态保存回当前会话。"""
 
     # reactive compact 会缩短消息列表，所以不能只用列表长度判断新消息。
+    # 优先用 LangGraph 分配的 message.id；尚无 id 时才退化到对象身份。
     seen = {
         message_key(message)
         for message in session_state.get("messages", [])
     }
     final_state: RecoveryAgentState | None = None
 
+    # values 模式每一步都返回完整状态，seen 集合负责增量显示。
     for state in agent.stream(
         session_state,
         stream_mode="values",
@@ -753,6 +795,7 @@ def agent_loop(session_state: RecoveryAgentState) -> None:
             seen.add(key)
             print_message(message)
 
+    # 保存整个 state，不能只保存 messages，否则 recovery 字段会在工具循环后丢失。
     if final_state is not None:
         session_state.clear()
         session_state.update(final_state)
@@ -774,6 +817,7 @@ def main() -> None:
         if query.strip().lower() in {"", "q", "exit"}:
             break
 
+        # 只追加用户消息；模型和工具结果由 create_agent 的 reducer 自动合并。
         session_state["messages"].append(HumanMessage(content=query))
         try:
             agent_loop(session_state)

@@ -77,6 +77,7 @@ CONSOIDATE_THRESHOLD = 10
 # ------------------------------------------------------------------
 def content_to_text(content:Any) ->str:
     """通用函数，将内容转换为字符串"""
+    # 普通聊天补全最常见的是 str，直接返回可避免不必要序列化。
     if isinstance(content,str):
         return content
 
@@ -84,6 +85,7 @@ def content_to_text(content:Any) ->str:
     if not isinstance(content,list):
         return str(content)
     texts: list[str] = []
+    # 多内容块兼容字符串、OpenAI 字典块和 LangChain 对象块。
     for block in content:
         if isinstance(block, str):
             texts.append(block)
@@ -109,6 +111,7 @@ def content_to_text(content:Any) ->str:
 # 同时支持 dict 消息和 LangChain 消息对象，并把具体 content 交给 content_to_text。
 # ------------------------------------------------------------------
 def message_to_text(message) -> str:
+    # 测试或外部调用可能仍传入 role/content 字典；Agent 内部通常已是 BaseMessage。
     if isinstance(message, dict):
         return content_to_text(message.get("content",""))
 
@@ -147,11 +150,13 @@ def parse_json_array(text: str) -> list[Any] | None:
 
     decoder = json.JSONDecoder()
 
+    # 不假设 JSON 位于代码围栏内；从每个 [ 位置尝试解码更能容忍前置解释文本。
     for index, character in enumerate(text):
         if character != "[":
             continue
 
         try:
+            # raw_decode 允许数组后仍有额外文本，而 json.loads 要求整串都是 JSON。
             value,_ = decoder.raw_decode(text[index:])
         except json.JSONDecodeError:
             continue
@@ -167,6 +172,7 @@ def parse_json_array(text: str) -> list[Any] | None:
 # 若清洗后为空，用纳秒时间戳生成唯一兜底名。
 # ------------------------------------------------------------------
 def slugify(name : str) -> str:
+    # 先小写和 trim，再把不安全字符批量替换为连字符。
     slug = name.strip().lower()
     slug = re.sub(r"[^a-z0-9\u4e00-\u9fff_-]+", "-", slug)
     slug = re.sub(r"-+", "-", slug).strip("-_")
@@ -196,6 +202,7 @@ class MarkdownMemoryStore:
             root: Path,
             model: Any,
         ) -> None:
+        # resolve 固定真实根目录，后续路径校验可使用规范化绝对路径比较。
         self.root = root.resolve()
         self.index_path = self.root / "MEMORY.md"
         self.model = model
@@ -219,6 +226,7 @@ class MarkdownMemoryStore:
         if not raw.startswith("---"):
             return {}, raw.strip()
 
+        # 最多切两次，正文后续即使包含水平分隔线 --- 也不会被误拆。
         parts = raw.split("---",2)
 
         if  len(parts)<3:
@@ -269,6 +277,7 @@ class MarkdownMemoryStore:
             "type": nomalozed_type,
         }
 
+        # allow_unicode 避免中文被写成 \u 转义；sort_keys=False 保持人工可读字段顺序。
         frontmatter = yaml.safe_dump(
             metadata,
             allow_unicode=True,
@@ -304,6 +313,7 @@ class MarkdownMemoryStore:
     ) -> str |None:
 
         # Path(filename).name 丢弃目录部分，是防路径穿越的第一层。
+        # Path(...).name 丢弃 ../ 和目录部分，只允许访问根目录下一层文件。
         safe_name = Path(filename).name
 
         path = self.root / safe_name
@@ -327,6 +337,7 @@ class MarkdownMemoryStore:
         memories: list[dict[str,str]] = []
 
         # MEMORY.md 是派生索引，不能被当作一条普通记忆再次收录。
+        # 排序让 MEMORY.md 索引稳定，减少版本控制中的无意义顺序变化。
         for path in sorted(self.root.glob("*.md")):
             if path.name == "MEMORY.md":
                 continue
@@ -376,6 +387,7 @@ class MarkdownMemoryStore:
                 f" — {memory['description']}"
             )
 
+        # 空记忆集合对应空索引文件，而不是保留过时目录内容。
         content = (
             "\n".join(lines) + "\n"
             if lines
@@ -424,6 +436,7 @@ class MarkdownMemoryStore:
             if len(parts) >=max_message:
                 break
 
+        # 先恢复自然时间顺序再限长，模型看到的是从较早到最新的用户意图。
         return "\n".join(reversed(parts))[:4000]
 
 
@@ -448,6 +461,7 @@ class MarkdownMemoryStore:
             )
         }
 
+        # 元组保存 score 和 filename；正文从不参与本地匹配，保持检索成本轻量。
         scored: list[tuple[int, str]] = []
 
         for memory in memories:
@@ -466,6 +480,7 @@ class MarkdownMemoryStore:
                 scored.append(
                     (score, memory["filename"])
                 )
+        # 同分时保留原扫描顺序；reverse 只把更高重合度放前面。
         scored.sort(
             key=lambda item: item[0],
             reverse=True,
@@ -486,6 +501,7 @@ class MarkdownMemoryStore:
         messages: list[AnyMessage],
         max_items: int = MAX_RELEVANT_MEMORIES,
     ) -> list[str]:
+        # 每次从磁盘读取，确保人工编辑或删除可立即反映到下一回合。
         memories = self.list_memory_files()
 
         if not memories:
@@ -518,6 +534,7 @@ class MarkdownMemoryStore:
         )
 
         try:
+            # 辅助分类调用不绑定工具，system prompt 还额外要求仅返回 JSON。
             response = self.model.invoke(
                 [
                     SystemMessage(
@@ -538,6 +555,7 @@ class MarkdownMemoryStore:
             if items is not None:
                 selected: list[str] = []
 
+                # 模型输出是不可信输入：类型、上下界、去重和最大数量都由代码强制。
                 for item in items:
                     if not isinstance(item, int):
                         continue
@@ -594,6 +612,7 @@ class MarkdownMemoryStore:
             ),
         ]
 
+        # 索引可能在文件被人工删除后短暂失效；read 返回 None 时安全跳过。
         for filename in filenames:
             content = self.read_memory_file(filename)
 
@@ -620,6 +639,7 @@ class MarkdownMemoryStore:
     ) -> str:
         parts: list[str] = []
 
+        # 只取最近窗口，长期任务中的早期噪声不参与本轮记忆提取。
         for message in messages[-max_messages:]:
             text = message_to_text(message).strip()
 
@@ -628,6 +648,7 @@ class MarkdownMemoryStore:
 
             role = message_role(message)
 
+            # 单条 2000 字符和总计 8000 字符是两层独立预算。
             parts.append(
                 f"{role}: {text[:2000]}"
             )
@@ -689,6 +710,7 @@ class MarkdownMemoryStore:
 
         # 记忆提取是回合后的辅助调用；失败只影响记忆增强，不应回滚主 Agent 已完成的工作。
         try:
+            # 记忆提取是回合后的辅助调用；失败只影响记忆，不回滚用户主任务。
             response = self.model.invoke(
                 [
                     SystemMessage(
@@ -744,6 +766,7 @@ class MarkdownMemoryStore:
                 if not description or not body:
                     continue
 
+                # write_memory_file 会规范类型和文件名，并立即同步索引。
                 self.write_memory_file(
                     name=name,
                     memory_type=memory_type,
@@ -780,6 +803,7 @@ class MarkdownMemoryStore:
             return None
 
         # 合并输入最多在提示词拼接时截到 20000 字符，控制辅助调用成本。
+        # 合并模型需要正文才能判断重复或冲突，因此此处展开全部记忆。
         source = "\n\n".join(
             (
                 f"## {memory['filename']}\n"
@@ -818,6 +842,7 @@ class MarkdownMemoryStore:
                 ]
             )
 
+            # 与提取路径复用同一个宽容 JSON 数组解析器。
             items = parse_json_array(content_to_text(response.content))
 
             if items is None:
@@ -869,6 +894,7 @@ class MarkdownMemoryStore:
             if not validated:
                 return None
 
+            # 直到 validated 非空才进入破坏性提交阶段；此前旧文件始终完整保留。
             old_count = len(memories)
 
             # 这是合并提交阶段：合法新集合已准备好，才删除旧的单条记忆文件。
@@ -946,6 +972,7 @@ class LongTermMemoryMiddleware(
             runtime:Runtime
             )-> dict[str, Any] | None:
         """每个用户回合只检索一次，避免每次工具循环都调用检索模型。"""
+        # 复制列表让检索辅助逻辑不能意外原地修改 AgentState.messages。
         messages = list(
             state.get(
                 "messages",
@@ -971,6 +998,7 @@ class LongTermMemoryMiddleware(
     # ----------------------------------------------------------
     def before_model(self, state, runtime):
         """在 s08 的压缩 Middleware 运行前保存快照。"""
+        # 快照放在 state 扩展字段中，不注入对话；after_agent 会读取并清空。
         return{
             "memory_source_messages": list(
                 state.get(
@@ -998,6 +1026,7 @@ class LongTermMemoryMiddleware(
 
         memory_index = str(state.get("active_memory_index","")).strip()
         memory_context = str(state.get("active_memory_context","")).strip()
+        # 测试环境可能没有传 system_message，因此用 s08 父提示词作为语义兜底。
         system_message = (request.system_message or SystemMessage(content=s08.PARENT_SYSTEM))
 
         system_text = message_to_text(system_message)
@@ -1022,12 +1051,14 @@ class LongTermMemoryMiddleware(
 
         # 相关正文只加到最新 HumanMessage；历史用户消息保持原样，避免重复注入。
         if memory_context:
+            # 倒序只修改最新 HumanMessage；更早用户消息绝不重复嵌入相同记忆。
             for index in range(len(request_message)-1,-1,-1):
                 message = request_message[index]
                 if not isinstance(message,HumanMessage):
                     continue
                 original_content = message.content
 
+                # 三个分支分别保护纯文本、多模态块和未知 provider 内容类型。
                 if isinstance(original_content,str):
                     new_content: Any = (f"{memory_context}\n\n"f"{original_content}")
 
@@ -1070,6 +1101,7 @@ class LongTermMemoryMiddleware(
         # 优先使用压缩前快照；若不存在，才回退到最终 state.messages。
         source_messages = list(state.get("memory_source_messages") or state.get("messages",[]))
 
+        # 提取使用压缩前快照，避免 s08 摘要丢掉值得长期保存的具体偏好。
         extracted = self.store.extract_memories(source_messages)
 
         if extracted:

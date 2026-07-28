@@ -51,7 +51,7 @@ class RecoveryAgentState(AgentState):
 
 - `code.py`：默认可运行版本，与无注释版逻辑一致。
 - `code_uncommented.py`：便于直接阅读完整控制流的精简版本。
-- `code_commented.py`：逐段解释状态、错误分类、重试和消息回写的详细注释版。
+- `code_commented.py`：逐步解释状态生命周期、错误分类、退避、降级、续写和消息回写的详细注释版。
 
 ---
 

@@ -198,6 +198,7 @@ def snip_compact(
 # 非字符串内容用 JSON 表示，ensure_ascii=False 保留中文可读性。
 # ------------------------------------------------------------------
 def _message_content_text(message: AnyMessage) -> str:
+    # 字节预算、预览和落盘必须使用同一种序列化，否则阈值会前后不一致。
     content = message.content
     if isinstance(content,str):
         return content
@@ -220,6 +221,7 @@ def micro_compact(
     """旧工具结果占位"""
     result = list(messages)
 
+    # 先收集索引而不是直接删除列表元素，避免删除一个元素后其他索引整体左移。
     tool_result_indexes = [
         index
         for index, message in enumerate(result)
@@ -230,6 +232,7 @@ def micro_compact(
     old_indexes = tool_result_indexes[:-KEEP_RECENT_TOOL_RESULTS]
 
 
+    # 只处理旧结果；最近 KEEP_RECENT_TOOL_RESULTS 条保留原文以保证短期可追溯。
     for index in old_indexes:
         message = result[index]
         content = _message_content_text(message)
@@ -290,6 +293,7 @@ def persist_large_output(
         parents=True,
         exist_ok=True
     )
+    # tool_call_id 来自模型，不能直接当作文件名；过滤斜杠和特殊字符防止路径逃逸。
     safe_id = re.sub(
         r"[^a-zA-Z0-9_.-]",
         "_",
@@ -299,6 +303,7 @@ def persist_large_output(
     path = TOOL_RESULTS_DIR / f"{safe_id}.txt"
 
     # 同一 tool_call_id 只写一次，重试时继续引用首次保存的完整输出。
+    # 不覆盖既有文件，重试/重复引用同一 tool_call_id 时仍能读取首次完整输出。
     if not path.exists():
         path.write_text(
             output,
@@ -324,8 +329,9 @@ def tool_result_budget(
         messages: list[AnyMessage],
         max_bytes:int = TOOL_RESULT_BUGET_BYTES,
 ) -> list[AnyMessage]:
+    # 复制列表后只替换消息对象，调用方的原始 state 不会被原地修改。
     result = list(messages)
-    """找到末尾的toolmessages"""
+    # 从末尾回溯连续 ToolMessage，当前工具批次通常正是这段消息。
     start = len(result)
 
     # 只处理末尾连续结果组，因为它通常对应刚完成的一次并行工具调用。
@@ -351,6 +357,7 @@ def tool_result_budget(
     
 
     # 从最大项开始替换，通常用最少文件操作就能让总量快速下降。
+    # 按体积从大到小处理，通常最少的落盘操作就能显著降低上下文体积。
     ranked_indexes = sorted(
         indexes,
         key = lambda index: _content_bytes(result[index]),
@@ -386,11 +393,8 @@ def tool_result_budget(
 
     return result
 
-"""
-一定保持这个执行顺序：
-tool_result_budget → snip_compact → micro_compact
-因为 micro_compact 先运行的话，原始大输出就没机会落盘了。
-"""
+# 一定保持这个执行顺序：tool_result_budget -> snip_compact -> micro_compact。
+# micro_compact 如果先运行，原始大输出会被占位符替换，后续就没有内容可落盘。
 
 
 # ------------------------------------------------------------------
@@ -424,6 +428,7 @@ Be concise, but preserve concrete paths, commands, names and decisions.
 def write_transcript(
         messages: list[AnyMessage],
 )->Path:
+    # transcript 是压缩前的恢复副本；即使摘要模型失败，原始历史仍然可查。
     TRANSCRIPT_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -435,6 +440,7 @@ def write_transcript(
         "w",
         encoding="utf-8",
     ) as file:
+        # 一行一条消息让文件可增量读取，也便于定位某条损坏记录。
         for message in messages:
             data = message_to_dict(message)
 
@@ -461,11 +467,13 @@ def summarize_history(
     if not messages:
         return "no messages"
     
+    # get_buffer_string 把不同 BaseMessage 统一成可读的 role/content 文本。
     history = get_buffer_string(
         messages,
         format="xml",
     )
 
+    # focus 为空时不向摘要器注入额外偏好，避免无意义的提示词变化。
     focus_instruction = (
         f"\nCompaction focus:{focus}\n"
         if focus.strip()
@@ -480,6 +488,7 @@ def summarize_history(
         ]
     )
 
+    # 摘要模型的 AIMessage 仍可能是多内容块，因此复用统一文本提取器。
     summary = content_to_text(response.content).strip()
     if not summary:
         raise ValueError("Summary model return empty content")
@@ -503,10 +512,12 @@ def compact_history(
     替换消息列表：所有旧消息被替换为一条摘要。教学版只保留摘要；真实 Claude Code 会在 compact 后重新附加部分最近文件、计划、agent/skill/tool 等上下文。"""
 
     # 先保存再摘要：即使模型摘要失败，原始历史仍有 transcript 可供排查和恢复。
+    # 先落盘再调用模型，保证摘要失败时至少有完整 transcript。
     transcript_path = write_transcript(messages)
 
     print(f"[Transcript saved: {transcript_path}]")
 
+    # 摘要结果只需支持后续 Agent 继续工作，不追求逐字还原原始对话。
     summary = summarize_history(
         messages,
         model,
@@ -514,6 +525,7 @@ def compact_history(
     )
 
     # 压缩后的单条 HumanMessage 带 transcript 路径元数据，正文只放模型继续工作所需摘要。
+    # 调用方会用 RemoveMessage + 该列表替换旧 state；这里只构造新消息。
     return [
         HumanMessage(
             content=f"[{label}]\n\n{summary}",
@@ -531,6 +543,7 @@ def compact_history(
 # ------------------------------------------------------------------
 def is_prompt_too_long(exc: Exception) -> bool:
     """判断是否提示词过长"""
+    # 不同兼容端点可能只给文本、不提供 status_code，因此两类信号都检查。
     text = (f"{type(exc).__name__}:{exc}").lower()
 
     status_code = getattr(exc,"status_code",None)
@@ -553,12 +566,14 @@ def reactive_compact(
         messages: list[AnyMessage],
         model: ChatOpenAI,
 ) -> list[AnyMessage]:
+    # 应急路径仍先保存完整对话；这是一次服务端拒绝后的最后可追溯副本。
     transcript_path = write_transcript(messages)
 
     # 应急模式保留最近约五条，比主动全量摘要更重视触发错误前的局部工作现场。
     tail_start = max(0, len(messages)-5)
     tail_start = _safe_tail_start(messages,tail_start)
 
+    # 旧段交给摘要模型，最近段原样保留以维持当前工具现场。
     old_messages = messages[:tail_start]
     recent_messages = messages[tail_start:]
 
@@ -626,6 +641,7 @@ class ContentCompactionMiddleware(AgentMiddleware):
     # ----------------------------------------------------------
     # before_model 会在每次工具循环后再次运行，因此低成本整理能持续控制上下文增长。
     def before_model(self, state:CompactState, runtime:Runtime) ->dict[str, Any] | None:
+        # state["messages"] 是 LangGraph 当前完整历史；先复制，避免中间件直接改变 reducer 输入。
         orignal = list(state["messages"])
 
         # 顺序不可交换：先落盘原始大结果，再裁消息，最后才把旧结果替换为占位。
@@ -633,6 +649,7 @@ class ContentCompactionMiddleware(AgentMiddleware):
         messages = snip_compact(messages)
         messages = micro_compact(messages)
 
+        # compact_failures 是连续摘要失败计数；成功压缩或低于阈值时都会归零。
         failures = state.get("compact_failures",0)
         token_count = self._count_token(messages)
 
@@ -661,6 +678,7 @@ class ContentCompactionMiddleware(AgentMiddleware):
         elif token_count <= self.trigger_token:
             failures = 0
 
+        # 不要无条件返回 messages update：空 update 会让图产生额外、难以追踪的状态事件。
         update: dict[str, Any] = {}
 
         # 只在确有变化时返回 state update，减少无意义的图状态写入。
@@ -680,15 +698,18 @@ class ContentCompactionMiddleware(AgentMiddleware):
     # ----------------------------------------------------------
     # wrap_model_call 位于真正网络请求边界，因此能捕获服务端对 token 的最终判断。
     def wrap_model_call(self, request:ModelRequest, handler: Callable[[ModelRequest],ModelRequest]) -> ModelRequest | ExtendedModelResponse:
+        # 这里位于真实 provider 请求边界，只有服务端最终拒绝后才能确认上下文确实过长。
         try:
             return handler(request)
         except Exception as exc:
+            # 认证、网络、业务错误不能靠压缩解决，必须原样抛给上层处理。
             if not is_prompt_too_long(exc):
                 raise
 
             print("[reactive compact]")
 
             # 重试只发生一次；若第二次仍失败，异常会自然向外传播，避免无限递归。
+            # reactive_compact 返回“摘要 + 最近现场”；只重写本次 request，不修改原 request。
             compacted = reactive_compact(list(request.messages), self.summary_model)
             #应急压缩最多压缩一次
             response = handler(request.override(messages=compacted))
@@ -724,11 +745,13 @@ class ContentCompactionMiddleware(AgentMiddleware):
 # ------------------------------------------------------------------
 def _parse_frontmatter(raw: str) -> tuple[dict[str,Any], str]:
     """解析skill.md开头的yaml frontmatter"""
+    # s08 沿用 s07 的渐进式技能加载：启动时只解析轻量元数据。
     lines = raw.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, raw
     
     try:
+        # start=1 让找到的闭合 --- 索引仍对应原始 lines。
         end_index = next(
             index
             for index, lines in enumerate(lines[1:], start=1)
@@ -742,6 +765,7 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str,Any], str]:
     body = "\n".join(lines[end_index+1:])
 
     try: 
+        # safe_load 避免 YAML 构造任意 Python 对象。
         metadata = yaml.safe_load(yaml_text) or {}
     except yaml.YAMLError:
         metadata = {}
@@ -760,9 +784,11 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str,Any], str]:
 # ------------------------------------------------------------------
 def _scan_skills() -> None:
     """启动的时候自动扫描skills"""
+    # skills 目录不存在不是错误，catalog 会退化为明确的空目录提示。
     if not SKILL_DIR.exists():
         return
     
+    # 排序确保提示词顺序和 token 估算稳定。
     for manifest in sorted(SKILL_DIR.glob("*/SKILL.md")):
         raw = manifest.read_text(
             encoding="utf-8",
@@ -795,6 +821,7 @@ def _scan_skills() -> None:
             str(description).split()
         )
 
+        # 重名不能静默覆盖，否则 load_skill 的实际内容不确定。
         if name in SKILL_REGISTRY:
             raise ValueError(
                 f"Duplicate skill name: {name}"
@@ -878,6 +905,7 @@ HOOKS: dict[str, list[Callable[..., Any]]] = {
 # ------------------------------------------------------------------
 def register_hook(event: str,callable:Callable[..., Any]) -> None:
     """注册一个hook"""
+    # 事件名先校验，避免回调被注册到永远不会触发的拼写错误键。
 
     if event not in HOOKS:
         raise ValueError(f"unkown hook event:{event}")
@@ -892,6 +920,7 @@ def register_hook(event: str,callable:Callable[..., Any]) -> None:
 # ------------------------------------------------------------------
 def trigger_hook(event:str, *args: Any)-> Any|None:
     """按照顺序执行hook"""
+    # 第一个非 None 返回值具有短路语义，PreToolUse 用它表达拒绝原因。
     for callable in HOOKS.get(event,[]):
         result = callable(*args)
 
@@ -1017,6 +1046,7 @@ def resolve_path(raw_path:str)-> Path:
 
     candidate = Path(raw_path)
 
+    # 绝对路径保持真实含义，权限层才能正确识别工作区外目标。
     if candidate.is_absolute():
         return candidate.resolve()
     
@@ -1029,6 +1059,7 @@ def resolve_path(raw_path:str)-> Path:
 # 这是教学版字符串匹配，不等价于完整 shell 解析器，生产环境需要更严格的隔离。
 # ------------------------------------------------------------------
 def check_deny_list(command:str) ->str | None:
+    # 大小写归一化只用于教学字符串规则；生产系统仍应依赖沙箱而非黑名单。
     normalized = command.lower()
     for pattern in DANGEROUS_COMMANDS:
         if pattern.lower() in normalized:
@@ -1051,6 +1082,7 @@ def ask_users(tool_name:str, args:dict[str, Any],reason: str) ->bool:
     print(f"Tool: {tool_name}")
     print(f"Arguments: {args}")
 
+    # 仅 y/yes 放行，回车默认拒绝。
     choice = input("Allow? [y/N] ").strip().lower()
 
     return choice in {"y", "yes"}
@@ -1104,6 +1136,7 @@ def check_permission(
 )-> bool:
     "执行deny list 和权限规则检查"
 
+    # 硬拒绝优先，命中后不允许用户意外放行。
     if tool_name == "run_bash":
         command = str(args.get("command", ""))
 
@@ -1113,6 +1146,7 @@ def check_permission(
             print(f"\nBlocked: {denied_reason}")
             return False
         
+    # 软规则只要求确认，未命中则自动允许。
     confirmation_reason = check_rules(
         tool_name,
         args,
@@ -1230,6 +1264,7 @@ def load_skill(name: str) -> str:
         name: Exact skill name shown in the available-skills catalog.
     """
 
+    # 精确匹配让模型必须使用 catalog 中看到的名字，避免加载错误技能。
     skill = SKILL_REGISTRY.get(name)
 
     if skill is None:
@@ -1239,6 +1274,7 @@ def load_skill(name: str) -> str:
             f"Available skills: {available or '(none)'}"
         )
 
+    # root 先于正文返回，技能中出现相对脚本路径时已有明确解析基准。
     return (
         f"Loaded skill: {skill['name']}\n"
         f"Skill root: {skill['root']}\n"
@@ -1473,8 +1509,10 @@ def compact(
     """
 
     # ToolRuntime 提供调用时的完整 state；普通工具参数拿不到这份图状态。
+    # ToolRuntime.state 包含当前图状态；普通工具参数本身看不到这份历史。
     messages = list(runtime.state["messages"])
 
+    # compact 必须是当前最后一条 AIMessage 发起的工具调用，否则无法重建合法配对。
     last_ai = (messages[-1] if messages and isinstance(messages[-1],AIMessage) else None)
 
     if last_ai is None:
@@ -1485,6 +1523,7 @@ def compact(
         )
 
     # 从最后一条 AIMessage 中精确找到当前 compact 调用，避免并行 tool_call id 混淆。
+    # 通过 tool_call_id 精确匹配，避免一个 AIMessage 同时调用多个工具时拿错调用。
     compact_call = next(
         (
             call
@@ -1501,12 +1540,15 @@ def compact(
             status="error",
         )
     
+    # 手动压缩也保留完整 transcript，和自动压缩共享同一恢复语义。
     transcript_path = write_transcript(messages)
 
     # messages[:-1] 排除包含 compact tool_call 的 AIMessage，摘要内容更干净。
+    # 排除最后一条尚未执行完成的 compact AIMessage，摘要只包含此前真实对话。
     summary = summarize_history(messages[:-1],MODEL,focus)
 
     # 压缩后仍重建空 AIMessage + compact ToolMessage 对，满足 API 的工具消息配对要求。
+    # 即使历史被清空，仍重建 AI(tool_calls) + ToolMessage 配对，满足 provider 消息协议。
     compact_pair  = AIMessage(content="", tool_calls=[compact_call])
 
     result_message = ToolMessage(
@@ -1519,6 +1561,7 @@ def compact(
     )
 
     # 返回 Command 而不是普通字符串，因为该工具需要原子地重写整个消息 state。
+    # Command 让“清空旧消息 + 写摘要 + 写工具结果”作为一次状态更新提交。
     return Command(
         update={
             "messages": [
@@ -1607,6 +1650,7 @@ SUB_AGENT = create_agent(
 def extract_final_text(messages: list[Any]) -> str:
     """读取最后一条aimessage的中文文本内容"""
 
+    # 倒序跳过早期工具规划，只提取子 Agent 最终结论。
     for message in reversed(messages):
         if not isinstance(message, AIMessage):
             continue
@@ -1626,6 +1670,7 @@ def extract_final_text(messages: list[Any]) -> str:
 
         texts: list[str] = []
 
+        # provider 可能使用字符串块、字典块或带 .text 的对象块。
         for block in content:
             text:str | None =None
 
@@ -1674,9 +1719,11 @@ def task(description: str) -> str:
     print("\n\033[35m[Subagent spawned]\033[0m")
     print(f"Task: {description}")
 
+    # token 记录进入子 Agent 前的精确 ContextVar 值，finally 中可无损恢复。
     scope_token = AGENT_SCOPE.set("sub")
 
     try:
+        # 只传 description，不传父 messages；这就是上下文隔离边界。
         result = SUB_AGENT.invoke(
             {
                 "messages": [
@@ -1689,6 +1736,7 @@ def task(description: str) -> str:
             config={"recursion_limit": 64},
         )
 
+        # 父 Agent 只获得最终摘要，子 Agent 的探索历史不会占父上下文。
         summary = extract_final_text(
             result.get("messages", [])
         )
@@ -1711,6 +1759,7 @@ def task(description: str) -> str:
         )
 
     finally:
+        # 成功、异常、提前 return 都会恢复 scope，防止后续日志误标。
         AGENT_SCOPE.reset(scope_token)
         print("\033[35m[Subagent done]\033[0m")
 
@@ -1826,11 +1875,13 @@ def content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content
 
+    # 未知对象保留字符串表示，调试时不会静默丢失供应商特有内容。
     if not isinstance(content, list):
         return str(content)
 
     texts: list[str] = []
 
+    # 多内容块逐个提取文本，图片等非文本块在本终端示例中忽略。
     for block in content:
         if isinstance(block, str):
             texts.append(block)
@@ -1861,6 +1912,7 @@ def print_message(message: Any) -> None:
     """打印一条新产生的 Agent 消息。"""
 
     if isinstance(message, AIMessage):
+        # AIMessage 可以同时包含自然语言和 tool_calls，两部分都要展示。
         if message.tool_calls:
             print("\n模型调用工具：")
 
@@ -1943,6 +1995,7 @@ def agent_loop(
     last_todos = session_state.get("todos")
     final_state: dict[str, Any] | None = None
 
+    # values 模式每一步返回完整状态，因此需要 seen_message_count 做显示去重。
     for state in agent.stream(
         session_state,
         stream_mode="values",
@@ -1951,6 +2004,7 @@ def agent_loop(
 
         todos = state.get("todos")
 
+        # 仅 Todo 结构真正变化时重绘列表。
         if todos is not None and todos != last_todos:
             print_todos(todos)
             last_todos = todos
@@ -2015,6 +2069,7 @@ def main() -> None:
         }:
             break
 
+        # 同一个 session_state 在 while 外创建，messages/todos/失败计数可跨回合保留。
         session_state.setdefault(
             "messages",
             [],
@@ -2028,6 +2083,7 @@ def main() -> None:
         try:
             agent_loop(session_state)
 
+        # 循环未收敛与普通 API 异常分开提示，便于判断问题位于图控制流。
         except GraphRecursionError:
             print(
                 "\nAgent stopped because it reached "

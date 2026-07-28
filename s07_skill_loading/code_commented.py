@@ -67,11 +67,14 @@ SKILL_REGISTRY: dict[str, dict[str, str]] = {}
 # ------------------------------------------------------------------
 def _parse_frontmatter(raw: str) -> tuple[dict[str,Any], str]:
     """解析skill.md开头的yaml frontmatter"""
+    # splitlines 不保留换行符，便于精确比较分隔行是否为 ---。
     lines = raw.splitlines()
+    # 没有 frontmatter 时，整个文件都是正文；扫描器仍可用目录名作为技能名。
     if not lines or lines[0].strip() != "---":
         return {}, raw
     
     try:
+        # 从第二行开始找闭合分隔符；start=1 使索引仍对应原始 lines。
         end_index = next(
             index
             for index, lines in enumerate(lines[1:], start=1)
@@ -83,14 +86,17 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str,Any], str]:
         return {}, raw
     
 
+    # frontmatter 不含两条 ---；body 则从闭合分隔符下一行开始。
     yaml_text = "\n".join(lines[1:end_index])
     body = "\n".join(lines[end_index+1:])
 
     try: 
+        # safe_load 不构造任意 Python 对象，适合读取仓库内声明式元数据。
         metadata = yaml.safe_load(yaml_text) or {}
     except yaml.YAMLError:
         metadata = {}
 
+    # 合法 YAML 也可能是列表或字符串，但技能元数据必须是键值映射。
     if not isinstance(metadata, dict):
            metadata = {} 
 
@@ -105,9 +111,11 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str,Any], str]:
 # ------------------------------------------------------------------
 def _scan_skills() -> None:
     """启动的时候自动扫描skills"""
+    # 没有 skills 目录是允许状态，目录提示词稍后会显示 no skills found。
     if not SKILL_DIR.exists():
         return
     
+    # sorted 让扫描和 catalog 顺序跨平台稳定，便于缓存与测试。
     for manifest in sorted(SKILL_DIR.glob("*/SKILL.md")):
         raw = manifest.read_text(
             encoding="utf-8",
@@ -118,6 +126,7 @@ def _scan_skills() -> None:
         metadata, body = _parse_frontmatter(raw)
 
 
+        # 显式 name 优先；省略时用技能目录名作为稳定兜底。
         name = str(
             metadata.get("name")
             or manifest.parent.name
@@ -128,6 +137,7 @@ def _scan_skills() -> None:
         description = metadata.get("description")
 
         if not description:
+            # 只取第一条 Markdown 标题，不把整段正文提前泄露进 catalog。
             description = next(
                 (
                     line.lstrip("#").strip()
@@ -143,11 +153,13 @@ def _scan_skills() -> None:
         )
 
         # relative_to(WORKDIR) 让返回给模型的 root 简短、可移植，不暴露多余绝对路径。
+        # 重名若静默覆盖，会导致 catalog 描述与真正加载内容不确定。
         if name in SKILL_REGISTRY:
             raise ValueError(
                 f"Duplicate skill name: {name}"
             )
         
+        # 记录相对根目录，让技能正文引用 scripts/foo.py 时有明确解析基准。
         skill_root = manifest.parent.relative_to(
             WORKDIR
         ).as_posix()
@@ -167,6 +179,7 @@ def _scan_skills() -> None:
 # ------------------------------------------------------------------
 def list_skils() ->str:
     """生成注入system_prompt的轻量技能目录"""
+    # 空目录也返回明确文本，避免 system prompt 出现一个无内容标题。
     if not SKILL_REGISTRY:
         return "- (no skills found)"
     
@@ -180,8 +193,10 @@ def list_skils() ->str:
 # ------------------------------------------------------------------
 # 章节说明：扫描必须发生在构造 system prompt 之前，否则注入的目录会一直为空。
 # ------------------------------------------------------------------
+# 扫描和 catalog 构建只在模块加载时执行一次；热新增技能需要重启或显式重扫。
 _scan_skills()
 
+# catalog 只含 name/description，完整 content 仍留在注册表中。
 SKILL_CATALOG = list_skils()
 
 # ------------------------------------------------------------------
@@ -235,9 +250,11 @@ HOOKS: dict[str, list[Callable[..., Any]]] = {
 def register_hook(event: str,callable:Callable[..., Any]) -> None:
     """注册一个hook"""
 
+    # 拼错事件名应立即失败，不能创建一个永远不会触发的隐形事件。
     if event not in HOOKS:
         raise ValueError(f"unkown hook event:{event}")
     
+    # 列表追加保留声明顺序，多个权限或审计 Hook 的顺序因此可预测。
     HOOKS[event].append(callable)
 
 
@@ -248,6 +265,7 @@ def register_hook(event: str,callable:Callable[..., Any]) -> None:
 # ------------------------------------------------------------------
 def trigger_hook(event:str, *args: Any)-> Any|None:
     """按照顺序执行hook"""
+    # 找不到回调时自然返回 None，等价于“不拦截”。
     for callable in HOOKS.get(event,[]):
         result = callable(*args)
 
@@ -264,11 +282,13 @@ def trigger_hook(event:str, *args: Any)-> Any|None:
 def user_prompt_submit(state:AgentState, runtime:Runtime) -> dict[str, Any] |None:
     """父agent运行的时候触发"""
 
+    # before_agent 得到本轮输入前已经合并好的完整消息状态。
     messages = state.get("messages", [])
 
     if not messages:
         return None
     
+    # CLI 刚追加的用户输入位于末尾；历史消息不重复触发提交事件。
     last_messages = messages[-1]
 
     if isinstance(last_messages, dict):
@@ -319,6 +339,7 @@ def tool_hook(
     # 只有通过 PreToolUse 才进入真实 handler。PostToolUse 只观察已发生的结果。
     result = handler(request)
 
+    # after_agent 只做观察和日志，因此最终返回 None，不更新 state。
     trigger_hook(
         "PostToolUse",
         tool_name,
@@ -378,6 +399,7 @@ def resolve_path(raw_path:str)-> Path:
 
     candidate = Path(raw_path)
 
+    # 保留绝对路径的真实含义，让权限层能准确提示“工作区外访问”。
     if candidate.is_absolute():
         return candidate.resolve()
     
@@ -390,6 +412,7 @@ def resolve_path(raw_path:str)-> Path:
 # 这是教学版字符串匹配，不等价于完整 shell 解析器，生产环境需要更严格的隔离。
 # ------------------------------------------------------------------
 def check_deny_list(command:str) ->str | None:
+    # 统一大小写后再匹配，防止简单大小写变化绕过教学规则。
     normalized = command.lower()
     for pattern in DANGEROUS_COMMANDS:
         if pattern.lower() in normalized:
@@ -405,6 +428,7 @@ def check_deny_list(command:str) ->str | None:
 # ------------------------------------------------------------------
 def ask_users(tool_name:str, args:dict[str, Any],reason: str) ->bool:
 
+    # scope 只改变提示标签，批准动作仍由当前终端用户完成。
     scope = AGENT_SCOPE.get()
 
     print(f"\nWarning: [{scope}] Permission required")
@@ -412,6 +436,7 @@ def ask_users(tool_name:str, args:dict[str, Any],reason: str) ->bool:
     print(f"Tool: {tool_name}")
     print(f"Arguments: {args}")
 
+    # 提示中的大写 N 表示默认拒绝；空输入不会被视为同意。
     choice = input("Allow? [y/N] ").strip().lower()
 
     return choice in {"y", "yes"}
@@ -448,6 +473,7 @@ def  check_rules(
         raw_path = str(args.get("path", ""))
 
         try:
+            # 必须先 resolve 再比较，../ 和符号链接才不会欺骗边界判断。
             target = resolve_path(raw_path)
         except(OSError, RuntimeError, ValueError) as exc:
             return f"Invalid path:{exc}"
@@ -479,6 +505,7 @@ def check_permission(
             print(f"\nBlocked: {denied_reason}")
             return False
         
+    # 硬拒绝未命中后再运行软规则，软规则允许用户基于完整参数做决定。
     confirmation_reason = check_rules(
         tool_name,
         args,
@@ -531,6 +558,7 @@ def on_post_tool_use(
 
     print(f"[{scope} PostToolUse] {tool_name}")
 
+    # ToolMessage 有 content；Command 等特殊结果使用对象自身作为可观测文本。
     content = getattr(result, "content", result)
     preview = str(content)
 
@@ -546,6 +574,7 @@ def on_post_tool_use(
 # ------------------------------------------------------------------
 def on_stop(messages: list[Any]) ->None:
     tool_call_count = 0
+    # 一个 AIMessage 可包含多个 tool_calls，所以累计调用数组长度而非消息数。
     for message in messages:
         if isinstance(message, AIMessage):
             tool_call_count += len(message.tool_calls or [])
@@ -598,15 +627,18 @@ def load_skill(name: str) -> str:
         name: Exact skill name shown in the available-skills catalog.
     """
 
+    # 要求精确名称，避免相似匹配把错误技能说明注入高优先级上下文。
     skill = SKILL_REGISTRY.get(name)
 
     if skill is None:
+        # 失败时返回可恢复信息，模型可以从 available 列表修正名称后重试。
         available = ", ".join(SKILL_REGISTRY)
         return (
             f"Skill not found: {name}. "
             f"Available skills: {available or '(none)'}"
         )
 
+    # root 放在正文之前，使模型读取后续相对路径时已经知道解析规则。
     return (
         f"Loaded skill: {skill['name']}\n"
         f"Skill root: {skill['root']}\n"
@@ -637,6 +669,7 @@ def run_bash(command: str) -> str:
             timeout=120,
         )
 
+        # 合并两个流，让非零命令的诊断不会丢失在 stderr。
         output = (
             result.stdout
             + result.stderr
@@ -645,6 +678,7 @@ def run_bash(command: str) -> str:
         if not output:
             output = "(no output)"
 
+        # 返回码单独置顶，模型无需从错误文本猜测命令是否成功。
         if result.returncode != 0:
             output = (
                 f"Exit code: {result.returncode}\n"
@@ -679,13 +713,16 @@ def run_read(
     """
 
     try:
+        # resolve_path 只规范路径；工作区外访问已由调用前的权限 Hook 决定。
         file_path = resolve_path(path)
 
+        # errors="replace" 让少量非法字节变成替换字符，不让整个回合因解码中断。
         lines = file_path.read_text(
             encoding="utf-8",
             errors="replace",
         ).splitlines()
 
+        # limit 只控制交给模型的行数，磁盘文件保持不变。
         if limit is not None and limit >= 0 and limit < len(lines):
             remaining = len(lines) - limit
 
@@ -720,6 +757,7 @@ def run_write(
     try:
         file_path = resolve_path(path)
 
+        # 一次性创建所有父目录，允许模型写入尚不存在的嵌套路径。
         file_path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -758,6 +796,7 @@ def run_edit(
     try:
         file_path = resolve_path(path)
 
+        # 编辑采用“读取 -> 精确查找 -> 只替换第一处 -> 整体写回”的教学流程。
         current_content = file_path.read_text(
             encoding="utf-8",
             errors="replace",
@@ -767,6 +806,7 @@ def run_edit(
         if old_text not in current_content:
             return f"Error: old_text was not found in {path}"
 
+        # count=1 防止一个常见片段在文件中所有位置同时被替换。
         updated_content = current_content.replace(
             old_text,
             new_text,
@@ -800,6 +840,7 @@ def run_glob(pattern: str) -> str:
     try:
         results: list[str] = []
 
+        # root_dir 让返回值天然是工作区相对路径，便于直接交给 read/edit。
         for match in glob.glob(
             pattern,
             root_dir=WORKDIR,
@@ -807,6 +848,7 @@ def run_glob(pattern: str) -> str:
         ):
             full_path = (WORKDIR / match).resolve()
 
+            # resolve 后再次检查，过滤可能通过符号链接逃逸工作区的匹配项。
             if full_path.is_relative_to(WORKDIR):
                 results.append(match)
 
@@ -888,6 +930,7 @@ SUB_AGENT = create_agent(
 def extract_final_text(messages: list[Any]) -> str:
     """读取最后一条aimessage的中文文本内容"""
 
+    # 倒序是因为历史里可能有多条规划/工具调用 AIMessage，最后一条才是结论。
     for message in reversed(messages):
         if not isinstance(message, AIMessage):
             continue
@@ -902,11 +945,13 @@ def extract_final_text(messages: list[Any]) -> str:
 
             continue
 
+        # 非字符串、非列表内容通常不是可展示文本，继续寻找更早的 AIMessage。
         if not isinstance(content, list):
             continue
 
         texts: list[str] = []
 
+        # 逐块兼容 str、dict 和 provider 对象三种表示。
         for block in content:
             text:str | None =None
 
@@ -996,6 +1041,7 @@ def task(description: str) -> str:
         )
 
     finally:
+        # finally 在 return 和异常两条路径都会执行，防止后续父工具日志误标为 sub。
         AGENT_SCOPE.reset(scope_token)
         print("\033[35m[Subagent done]\033[0m")
 
@@ -1101,6 +1147,7 @@ agent = create_agent(
 def content_to_text(content: Any) -> str:
     """把 LangChain 消息内容转换成适合终端输出的文本。"""
 
+    # OpenAI-compatible chat completion 的常见返回是简单字符串。
     if isinstance(content, str):
         return content
 
@@ -1109,6 +1156,7 @@ def content_to_text(content: Any) -> str:
 
     texts: list[str] = []
 
+    # content block 列表常见于多模态或不同 provider 的统一消息格式。
     for block in content:
         if isinstance(block, str):
             texts.append(block)
@@ -1139,6 +1187,7 @@ def print_message(message: Any) -> None:
     """打印一条新产生的 Agent 消息。"""
 
     if isinstance(message, AIMessage):
+        # AIMessage 可同时带文本和工具调用，不能在打印 tool_calls 后直接 return。
         if message.tool_calls:
             print("\n模型调用工具：")
 
@@ -1222,6 +1271,7 @@ def agent_loop(
     last_todos = session_state.get("todos")
     final_state: dict[str, Any] | None = None
 
+    # values 模式输出每一步的完整 state；updates 模式则只输出节点增量。
     for state in agent.stream(
         session_state,
         stream_mode="values",
@@ -1230,6 +1280,7 @@ def agent_loop(
 
         todos = state.get("todos")
 
+        # 结构化比较避免相同 Todo 在模型/工具每个节点后重复打印。
         if todos is not None and todos != last_todos:
             print_todos(todos)
             last_todos = todos
@@ -1299,6 +1350,7 @@ def main() -> None:
         }:
             break
 
+        # 普通 role/content 字典会在图入口统一转换为 HumanMessage。
         session_state.setdefault(
             "messages",
             [],
@@ -1312,6 +1364,7 @@ def main() -> None:
         try:
             agent_loop(session_state)
 
+        # 该异常说明模型与工具循环没有在上限内收敛，单独给出明确诊断。
         except GraphRecursionError:
             print(
                 "\nAgent stopped because it reached "

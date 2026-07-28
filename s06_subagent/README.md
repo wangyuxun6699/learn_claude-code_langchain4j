@@ -54,7 +54,9 @@ PARENT_AGENT = create_agent(
 
 ## 本章文件
 
-`code.py` 为当前主版本，并保留详细注释版与精简版。
+- `code.py`：当前主版本。
+- `code_commented.py`：详细注释版，解释父子状态隔离、Hook、权限、工具协议和流式状态保存。
+- `code_uncommented.py`：无教学注释的精简版。
 
 ---
 

@@ -99,14 +99,18 @@ HOOKS: dict[str, list[Callable[..., Any]]] = {
 def register_hook(event: str, callback: Callable[..., Any]) -> None:
     """把 callback 注册到指定事件。"""
 
+    # 提前拒绝拼错的事件名，否则回调会被放进一个永远不会触发的列表。
     if event not in HOOKS:
         raise ValueError(f"Unknown hook event: {event}")
+
+    # append 保留注册顺序；权限检查依赖这一顺序可预测。
     HOOKS[event].append(callback)
 
 
 def trigger_hooks(event: str, *args: Any) -> Any | None:
     """触发事件；第一个非 None 返回值会终止后续 Hook。"""
 
+    # get(..., []) 让没有回调的已知事件自然成为 no-op。
     for callback in HOOKS.get(event, []):
         result = callback(*args)
 
@@ -129,10 +133,12 @@ def user_prompt_submit(
 ) -> dict[str, Any] | None:
     """父 Agent 开始执行前，把最新输入交给 UserPromptSubmit Hook。"""
 
+    # before_agent 收到的是本次图运行的完整 state，而非单独一条用户消息。
     messages = state.get("messages", [])
     if not messages:
         return None
 
+    # CLI 在 invoke/stream 前刚追加 HumanMessage，因此最后一条就是本轮输入。
     last_message = messages[-1]
 
     # 输入既可能是用户传入的 dict，也可能已被 LangChain 转成 BaseMessage。
@@ -187,6 +193,7 @@ def stop_hook(
 ) -> dict[str, Any] | None:
     """父 Agent 完成一轮请求后触发 Stop Hook。"""
 
+    # Stop Hook 只观察最终状态；返回 None 表示不再修改 messages/todos。
     trigger_hooks("Stop", state.get("messages", []))
     return None
 
@@ -219,14 +226,18 @@ def resolve_path(raw_path: str) -> Path:
     """把相对路径解析到 WORKDIR；绝对路径保持其绝对含义。"""
 
     candidate = Path(raw_path)
+    # 权限层需要知道用户/模型真正请求的目标，因此绝对路径不能偷偷重定位到 WORKDIR。
     if candidate.is_absolute():
         return candidate.resolve()
+
+    # resolve 会折叠 ..，后续 is_relative_to 检查看到的是规范化后的真实位置。
     return (WORKDIR / candidate).resolve()
 
 
 def check_deny_list(command: str) -> str | None:
     """返回禁止原因；安全时返回 None。"""
 
+    # 大小写归一化，避免 SUDO、Shutdown 等简单变体绕过字符串规则。
     normalized = command.lower()
     for pattern in DANGEROUS_COMMANDS:
         if pattern.lower() in normalized:
@@ -237,15 +248,18 @@ def check_deny_list(command: str) -> str | None:
 def check_rules(tool_name: str, args: dict[str, Any]) -> str | None:
     """返回需要用户确认的原因；无需确认时返回 None。"""
 
+    # shell 规则检查的是 command；文件工具规则检查的是 path。
     if tool_name == "run_bash":
         normalized = str(args.get("command", "")).lower()
         for pattern in POTENTIALLY_DESTRUCTIVE_COMMANDS:
             if pattern.lower() in normalized:
                 return f"Potentially destructive shell command: {pattern}"
 
+    # glob 只以 root_dir=WORKDIR 搜索，因此无需走这里的单路径确认流程。
     if tool_name in {"run_read", "run_write", "run_edit"}:
         raw_path = str(args.get("path", ""))
         try:
+            # 先解析再比较，避免 path 中的 .. 造成字符串前缀误判。
             target = resolve_path(raw_path)
         except (OSError, RuntimeError, ValueError) as exc:
             return f"Invalid path: {exc}"
@@ -260,6 +274,7 @@ def check_rules(tool_name: str, args: dict[str, Any]) -> str | None:
 def ask_user(tool_name: str, args: dict[str, Any], reason: str) -> bool:
     """在当前终端请求用户批准。子 Agent 的请求也会冒泡到这里。"""
 
+    # scope 只用于提示来源；父子 Agent 最终都由同一个人类终端批准。
     scope = AGENT_SCOPE.get()
     print(f"\nWarning: [{scope}] Permission required")
     print(f"Reason: {reason}")
@@ -274,12 +289,14 @@ def ask_user(tool_name: str, args: dict[str, Any], reason: str) -> bool:
 def check_permission(tool_name: str, args: dict[str, Any]) -> bool:
     """先执行硬拒绝规则，再执行需要确认的规则。"""
 
+    # deny list 优先级最高：命中后不提供“仍然批准”的机会。
     if tool_name == "run_bash":
         denied_reason = check_deny_list(str(args.get("command", "")))
         if denied_reason:
             print(f"\nBlocked: {denied_reason}")
             return False
 
+    # 只有未硬拒绝的调用才会进入 ask_user。
     confirmation_reason = check_rules(tool_name, args)
     if confirmation_reason:
         return ask_user(tool_name, args, confirmation_reason)
@@ -303,6 +320,7 @@ def on_pre_tool_use(
 ) -> str | None:
     """记录工具调用，并执行统一权限检查。"""
 
+    # ContextVar 让同一回调无需分别为父、子 Agent 注册两份。
     scope = AGENT_SCOPE.get()
     print(f"[{scope} PreToolUse] {tool_name}")
     print(f"Arguments: {tool_args}")
@@ -323,6 +341,7 @@ def on_post_tool_use(
     scope = AGENT_SCOPE.get()
     print(f"[{scope} PostToolUse] {tool_name}")
 
+    # 正常 ToolMessage 从 content 取值；Command 等特殊返回则直接字符串化。
     preview = str(getattr(result, "content", result))
     if len(preview) > 500:
         preview = preview[:500] + "...(truncated)"
@@ -333,6 +352,7 @@ def on_stop(messages: list[Any]) -> None:
     """统计本次父会话累积的消息和工具调用数量。"""
 
     tool_call_count = 0
+    # 一个 AIMessage 可以一次发起多个并行 tool_calls，因此不能只按消息条数统计。
     for message in messages:
         if isinstance(message, AIMessage):
             tool_call_count += len(message.tool_calls or [])
@@ -358,6 +378,7 @@ def run_bash(command: str) -> str:
     """Execute a shell command in the current workspace."""
 
     try:
+        # shell=True 让模型可使用管道和重定向；安全性由前面的 PreToolUse 规则兜底。
         result = subprocess.run(
             command,
             shell=True,
@@ -408,6 +429,7 @@ def run_write(path: str, content: str) -> str:
 
     try:
         file_path = resolve_path(path)
+        # mkdir 允许模型直接写入新目录；工作区外路径已经在权限 Hook 中要求确认。
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
         return f"Wrote {len(content)} characters to {path}"
@@ -422,6 +444,7 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
 
     try:
         file_path = resolve_path(path)
+        # 先完整读取再做一次精确替换，适合教学示例的小型文本文件。
         current_content = file_path.read_text(
             encoding="utf-8",
             errors="replace",
@@ -449,6 +472,7 @@ def run_glob(pattern: str) -> str:
         results: list[str] = []
 
         # root_dir 使结果保持为工作区相对路径，便于后续传给 read/edit。
+        # recursive=True 使 ** 生效；普通 * 的行为不受影响。
         for match in glob.glob(pattern, root_dir=WORKDIR, recursive=True):
             if (WORKDIR / match).resolve().is_relative_to(WORKDIR):
                 results.append(match)
@@ -694,12 +718,15 @@ agent = create_agent(
 def content_to_text(content: Any) -> str:
     """兼容字符串和多种 content block 表示，统一返回纯文本。"""
 
+    # 最常见路径：普通聊天模型直接把 content 设为 str。
     if isinstance(content, str):
         return content
+    # 对未知但可打印的 provider 类型保留诊断信息，而不是静默丢弃。
     if not isinstance(content, list):
         return str(content)
 
     texts: list[str] = []
+    # 列表内容兼容三种表示：字符串、OpenAI 字典块、LangChain 对象块。
     for block in content:
         if isinstance(block, str):
             texts.append(block)
@@ -747,6 +774,7 @@ def print_todos(todos: list[dict[str, Any]]) -> None:
     """显示 TodoListMiddleware 写入 AgentState 的 todos。"""
 
     print("\n当前 Todo：")
+    # start=1 与用户看到的自然任务编号一致，内部列表仍保持零基索引。
     for index, todo_item in enumerate(todos, start=1):
         status = todo_item.get("status", "pending")
         content = todo_item.get("content", "")
@@ -769,6 +797,7 @@ def agent_loop(session_state: dict[str, Any]) -> None:
     for state in agent.stream(session_state, stream_mode="values"):
         final_state = state
 
+        # TodoListMiddleware 只在列表变化时写新值，避免每个 state 快照重复打印。
         todos = state.get("todos")
         if todos is not None and todos != last_todos:
             print_todos(todos)
@@ -808,12 +837,14 @@ def main() -> None:
         if query.strip().lower() in {"", "q", "exit"}:
             break
 
+        # setdefault 兼容外部调用方传入缺少 messages 的普通 dict。
         session_state.setdefault("messages", []).append(
             {"role": "user", "content": query}
         )
 
         try:
             agent_loop(session_state)
+        # 图递归上限通常意味着模型/工具循环没有收敛，单独给出更清晰提示。
         except GraphRecursionError:
             print("\nAgent stopped because it reached the execution limit.")
         except Exception as exc:
