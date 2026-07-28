@@ -18,7 +18,7 @@
 
 ![s11: Error Recovery — 出错了，自己恢复](images/error-recovery-overview.svg)
 
-当前 LangChain 文件已经实现主/备模型、恢复状态、错误分类、`Retry-After` 解析、指数退避、输出截断判断和响应式裁剪等构件；完整的 `AgentMiddleware` 接线仍待继续完成。
+当前 LangChain 实现已完成三条恢复路径及 `AgentMiddleware` 接线：输出截断时执行 8K→64K 升级与最多 3 次续写，上下文超限时响应式裁剪并重试一次，遇到 429/529 时按 `Retry-After` 或指数退避重试，并在连续 3 次 529 后切换备用模型。`create_agent` 继续负责标准工具循环。
 
 ---
 
@@ -29,9 +29,8 @@ PRIMARY_MODEL = ChatOpenAI(
     model=MODEL_ID, api_key=API_KEY, base_url=BASE_URL,
     max_retries=0, timeout=120,
 )
-FALLBACK_MODEL = ChatOpenAI(
-    model=FALLBACK_MODEL_ID, api_key=API_KEY, base_url=BASE_URL,
-    max_retries=0, timeout=120,
+FALLBACK_MODEL = (
+    build_model(FALLBACK_MODEL_ID) if FALLBACK_MODEL_ID else None
 )
 
 def retry_delay(attempt: int, retry_after: float | None = None) -> float:
@@ -44,13 +43,15 @@ class RecoveryAgentState(AgentState):
     recovery: NotRequired[dict[str, Any]]
 ```
 
-这里把 SDK 自带重试关掉，避免它与教学版恢复层重复重试。注意：本章目前是恢复组件草稿，`main()` 尚未把这些组件装配成可对话 Agent。
+这里关闭 SDK 自带重试，避免它与教学恢复层重复重试。恢复状态会在一次用户请求的模型/工具循环中持续保留，并在下一条用户请求开始前自动重置。未配置 `FALLBACK_MODEL_ID` 时不会创建备用客户端，连续 529 将继续使用主模型退避重试。
 
 ---
 
 ## 本章文件
 
-`code.py` 是当前未完工的 LangChain 草稿；README 明确标注状态，避免把占位装配误当作可运行实现。
+- `code.py`：默认可运行版本，与无注释版逻辑一致。
+- `code_uncommented.py`：便于直接阅读完整控制流的精简版本。
+- `code_commented.py`：逐段解释状态、错误分类、重试和消息回写的详细注释版。
 
 ---
 
@@ -64,6 +65,13 @@ python -m venv venv
 pip install -r requirements.txt
 Copy-Item .env.example .env
 python -m s11_error_recovery.code
+```
+
+也可以分别运行两个学习版本：
+
+```powershell
+python -m s11_error_recovery.code_uncommented
+python -m s11_error_recovery.code_commented
 ```
 
 > 这些教学 Agent 可以执行命令和修改文件。建议先在测试目录中试用，并认真阅读每次权限提示。

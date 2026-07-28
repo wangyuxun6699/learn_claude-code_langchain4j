@@ -30,8 +30,7 @@ result = agent.invoke({"messages": [{"role": "user", "content": query}]})
 
 ## 当前范围
 
-- s01～s10：已有 LangChain 实现。
-- s11：已有恢复策略构件，但还没有完成 middleware 与 Agent 装配。
+- s01～s11：已有 LangChain 实现；s11 已完成错误恢复 middleware 与 Agent 装配。
 - s12～s20：仅建立章节目录和空 `code.py`，等待后续实现。
 - 每章 README 的教学部分已替换为 LangChain 代码；折叠区“深入 CC 源码”保留参考仓库原文，方便对照真实 Claude Code Harness。
 
@@ -74,7 +73,7 @@ BASE_URL=https://your-openai-compatible-endpoint/v1
 | 08 | [s08: Context Compact](s08_context_compact/) | 多层上下文压缩 | ✅ 已实现 |
 | 09 | [s09: Memory](s09_memory/) | Markdown 长期记忆 | ✅ 已实现 |
 | 10 | [s10: System Prompt](s10_system_prompt/) | 动态 system prompt | ✅ 已实现 |
-| 11 | [s11: Error Recovery](s11_error_recovery/) | 恢复组件草稿（未完成装配） | 🟡 草稿 |
+| 11 | [s11: Error Recovery](s11_error_recovery/) | 截断续写、上下文恢复与退避降级 | ✅ 已实现 |
 | 12 | [s12: Task System](s12_task_system/) | 等待 LangChain 实现 | ⬜ 占位 |
 | 13 | [s13: Background Tasks](s13_background_tasks/) | 等待 LangChain 实现 | ⬜ 占位 |
 | 14 | [s14: Cron Scheduler](s14_cron_scheduler/) | 等待 LangChain 实现 | ⬜ 占位 |
@@ -98,6 +97,8 @@ learn_claude_code/
 ├── ...
 ├── s11_error_recovery/
 │   ├── code.py
+│   ├── code_commented.py
+│   ├── code_uncommented.py
 │   └── README.md
 ├── s12_task_system/ ... s20_comprehensive/
 │   ├── code.py              # 空占位
