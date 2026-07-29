@@ -46,8 +46,8 @@ load_dotenv(override=True)
 MODEL = os.environ["MODEL_ID"]
 
 # 读取 OpenAI 兼容接口需要的 API key。
-# 这里兼容多个变量名：优先 OPENAI_API_KEY，其次 deepseek_api_key，最后兼容旧的 ANTHROPIC_API_KEY。
-OPENAI_API_KEY = os.getenv("deepseek_api_key")
+# 使用标准的 OPENAI_API_KEY 环境变量。
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 # 读取 OpenAI 兼容接口的 base_url。

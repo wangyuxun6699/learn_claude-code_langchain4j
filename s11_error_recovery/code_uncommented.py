@@ -41,16 +41,10 @@ MEMORY_INDEX = WORKDIR / ".memory" / "MEMORY.md"
 
 MODEL_ID = os.environ["MODEL_ID"]
 BASE_URL = os.getenv("BASE_URL")
-API_KEY = (
-    os.getenv("deepseek_api_key")
-    or os.getenv("DEEPSEEK_API_KEY")
-    or os.getenv("OPENAI_API_KEY")
-)
+API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError(
-        "Set deepseek_api_key, DEEPSEEK_API_KEY, or OPENAI_API_KEY in .env"
-    )
+    raise RuntimeError("Set OPENAI_API_KEY in .env")
 
 fallback_value = os.getenv("FALLBACK_MODEL_ID", "").strip()
 FALLBACK_MODEL_ID = (

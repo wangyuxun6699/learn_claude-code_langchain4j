@@ -18,7 +18,7 @@ from langchain_openai import ChatOpenAI
 
 model = ChatOpenAI(
     model=os.environ["MODEL_ID"],
-    api_key=os.environ["deepseek_api_key"],
+    api_key=os.environ["OPENAI_API_KEY"],
     base_url=os.environ["BASE_URL"],
     temperature=0,
 )
@@ -51,7 +51,7 @@ python -m s01_agent_loop.code
 
 ```dotenv
 MODEL_ID=your-model-id
-deepseek_api_key=your-api-key
+OPENAI_API_KEY=your-api-key
 BASE_URL=https://your-openai-compatible-endpoint/v1
 ```
 

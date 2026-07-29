@@ -54,7 +54,7 @@ MEMORY_INDEX = WORKDIR / ".memory" / "MEMORY.md"
 
 # 三个值共同描述一个 OpenAI-compatible 模型端点。
 MODEL_ID = os.environ["MODEL_ID"]
-API_KEY = os.environ["deepseek_api_key"]
+API_KEY = os.environ["OPENAI_API_KEY"]
 
 BASE_URL = os.environ["BASE_URL"]
 

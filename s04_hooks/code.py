@@ -194,8 +194,8 @@ path = os.getcwd()
 # 从 .env 或系统环境变量中读取模型名称。
 MODEL_ID = os.getenv("MODEL_ID")
 
-# 这里读取 deepseek_api_key，并作为 api_key 传给 ChatOpenAI。
-OPENAI_API_KEY = os.getenv("deepseek_api_key")
+# 这里读取 OPENAI_API_KEY，并作为 api_key 传给 ChatOpenAI。
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # 系统提示词告诉模型：它是当前目录下的 coding agent，要通过工具解决任务。
 SYSTEM = f"you are a coding agent at {path}. Use tools to solve tasks. Act dont explain"
@@ -519,7 +519,7 @@ MODEL = ChatOpenAI(
     max_tokens=8000,
     # temperature=0 表示尽量稳定、确定性输出。
     temperature=0,
-    # API key 来自 deepseek_api_key 环境变量。
+    # API key 来自 OPENAI_API_KEY 环境变量。
     api_key=OPENAI_API_KEY,
     # base_url 来自 BASE_URL 环境变量。
     base_url=OPENAI_BASE_URL,

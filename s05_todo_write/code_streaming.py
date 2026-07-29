@@ -53,7 +53,7 @@ def stop_hook(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
 WORKDIR = Path.cwd()
 path = os.getcwd()
 MODEL_ID = os.getenv('MODEL_ID')
-OPENAI_API_KEY = os.getenv('deepseek_api_key')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 SYSTEM = f"""
     You are a coder assistant in {path}
     You must use write_todos for every non-trivial user request.

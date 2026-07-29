@@ -641,7 +641,7 @@ _scan_skills()
 SKILL_CATALOG = list_skils()
 
 MODEL_ID = os.getenv("MODEL_ID")
-OPENAI_API_KEY = os.getenv("deepseek_api_key")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("BASE_URL")
 
 

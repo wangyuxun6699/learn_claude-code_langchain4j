@@ -88,7 +88,7 @@ WORKDIR = Path.cwd()
 path = os.getcwd()
 # 模型名、API key 和 base_url 都从 .env / 环境变量读取。
 MODEL_ID = os.getenv('MODEL_ID')
-OPENAI_API_KEY = os.getenv('deepseek_api_key')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 SYSTEM = f'you are a coding agent at {path}. Use tools to solve tasks. Act dont explain'
 OPENAI_BASE_URL = os.getenv('BASE_URL')
 # dangerous 是第一层硬拦截列表，用来阻止明显危险的 shell 命令。

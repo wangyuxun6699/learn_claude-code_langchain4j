@@ -57,17 +57,16 @@ load_dotenv(override=True)
 # 所有文件工具和 shell 工具都以程序启动目录作为工作区。
 WORKDIR = Path.cwd().resolve()
 
-# 兼容当前项目原有的 DeepSeek/OpenAI 兼容接口变量名，
-# 同时也兼容标准 OPENAI_API_KEY / OPENAI_BASE_URL。
+# 使用标准 OPENAI_API_KEY，并兼容 BASE_URL / OPENAI_BASE_URL 两种地址变量名。
 MODEL_ID = os.getenv("MODEL_ID")
-OPENAI_API_KEY = os.getenv("deepseek_api_key") or os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("BASE_URL") or os.getenv("OPENAI_BASE_URL")
 
 # 尽早检查必要配置，避免运行到第一次模型请求时才得到难理解的错误。
 if not MODEL_ID:
     raise RuntimeError("Missing MODEL_ID in .env")
 if not OPENAI_API_KEY:
-    raise RuntimeError("Missing deepseek_api_key or OPENAI_API_KEY in .env")
+    raise RuntimeError("Missing OPENAI_API_KEY in .env")
 
 
 # ============================================================

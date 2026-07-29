@@ -52,19 +52,13 @@ load_dotenv(override=True)
 WORKDIR = Path.cwd().resolve()
 MEMORY_INDEX = WORKDIR / ".memory" / "MEMORY.md"
 
-# 当前仓库仍兼容早期章节使用的小写 deepseek_api_key。
+# 使用标准的 OPENAI_API_KEY 环境变量。
 MODEL_ID = os.environ["MODEL_ID"]
 BASE_URL = os.getenv("BASE_URL")
-API_KEY = (
-    os.getenv("deepseek_api_key")
-    or os.getenv("DEEPSEEK_API_KEY")
-    or os.getenv("OPENAI_API_KEY")
-)
+API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError(
-        "Set deepseek_api_key, DEEPSEEK_API_KEY, or OPENAI_API_KEY in .env"
-    )
+    raise RuntimeError("Set OPENAI_API_KEY in .env")
 
 fallback_value = os.getenv("FALLBACK_MODEL_ID", "").strip()
 # 直接复制 .env.example 时，示例占位符不能被误当成真实备用模型。

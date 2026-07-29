@@ -204,7 +204,7 @@ SKILL_CATALOG = list_skils()
 # 这里只把目录注入提示词，完整技能正文仍留在 SKILL_REGISTRY 中等待 load_skill。
 # ------------------------------------------------------------------
 MODEL_ID = os.getenv("MODEL_ID")
-OPENAI_API_KEY = os.getenv("deepseek_api_key")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("BASE_URL")
 
 

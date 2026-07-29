@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AI
 from langchain_core.tools import StructuredTool
 load_dotenv(override=True)
 MODEL = os.environ['MODEL_ID']
-OPENAI_API_KEY = os.getenv('deepseek_api_key')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_BASE_URL = os.getenv('BASE_URL')
 path = os.getcwd()
 SYSTEM = f'you are a coding agent at {path}. Use bash to solve tasks. Act dont explain'

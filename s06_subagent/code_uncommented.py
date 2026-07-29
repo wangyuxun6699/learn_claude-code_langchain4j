@@ -30,13 +30,13 @@ load_dotenv(override=True)
 
 WORKDIR = Path.cwd().resolve()
 MODEL_ID = os.getenv("MODEL_ID")
-OPENAI_API_KEY = os.getenv("deepseek_api_key") or os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("BASE_URL") or os.getenv("OPENAI_BASE_URL")
 
 if not MODEL_ID:
     raise RuntimeError("Missing MODEL_ID in .env")
 if not OPENAI_API_KEY:
-    raise RuntimeError("Missing deepseek_api_key or OPENAI_API_KEY in .env")
+    raise RuntimeError("Missing OPENAI_API_KEY in .env")
 
 AGENT_SCOPE: ContextVar[str] = ContextVar("agent_scope", default="parent")
 

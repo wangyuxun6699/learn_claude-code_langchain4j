@@ -23,7 +23,7 @@ WORKDIR = Path.cwd().resolve()
 MEMORY_INDEX = WORKDIR / ".memory" / "MEMORY.md"
 
 MODEL_ID = os.environ["MODEL_ID"]
-API_KEY = os.environ["deepseek_api_key"]
+API_KEY = os.environ["OPENAI_API_KEY"]
 
 BASE_URL = os.environ["BASE_URL"]
 
