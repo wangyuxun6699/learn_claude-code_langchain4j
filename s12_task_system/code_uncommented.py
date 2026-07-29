@@ -548,8 +548,8 @@ def agent_loop(session_state: dict[str, Any]) -> None:
 
 def main() -> None:
     """启动 s12 命令行交互程序。"""
-    print("s12: task system")
-    print("Enter a question, press Enter to send. Type q to quit.\n")
+    print("s12：LangChain 持久化任务系统")
+    print("输入问题后按回车发送；输入 q、exit 或空行退出。\n")
 
     session_state: dict[str, Any] = {"messages": []}
     while True:
