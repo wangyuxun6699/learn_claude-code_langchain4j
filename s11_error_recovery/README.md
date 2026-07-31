@@ -570,7 +570,11 @@ python -m s11_error_recovery.code_commented
 
 ## 接下来
 
-s12 及以后尚未实现，目录中仅放置空 `code.py` 占位。
+Agent 现在能在错误中自动恢复了。但它处理的任务仍然是"一次性"的——你给它一个任务，它做完，结束。
+
+能不能让 Agent 管理一个**任务列表**——有依赖关系、持久化到磁盘、跨会话能恢复？TODO 列表不是任务系统。
+
+s12 Task System → 任务是有依赖、有状态、持久化的图。这是多 Agent 协作的基础。
 
 <details>
 <summary>深入 CC 源码</summary>

@@ -74,7 +74,10 @@ python -m s03_permission.code
 
 ## 接下来
 
-s04 将权限检查推广为完整的 Agent 生命周期 Hook。
+权限检查做了——但每次都在循环里硬编码 `check_permission()`。如果我想在每次工具执行前后加日志？如果想在某些操作后自动触发 git commit？这些扩展逻辑散落在 loop 里，循环很快就会膨胀。
+
+s04 Hooks → 给循环加钩子，扩展逻辑挂在钩子上，循环保持干净。
+
 
 <details>
 <summary>深入 CC 源码</summary>

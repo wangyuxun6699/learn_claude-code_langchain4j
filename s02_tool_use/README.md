@@ -65,7 +65,9 @@ python -m s02_tool_use.code
 
 ## 接下来
 
-s03 在工具真正执行之前加入拒绝规则和人工确认。
+现在 Agent 有 5 个专用工具。file tools 受 `safe_path` 保护，但 bash 不受限制，`rm -rf /` 还是能跑。
+
+s03 Permission → 在工具执行之前加一道门：这个操作安全吗？需要用户批准吗？
 
 <details>
 <summary>深入 CC 源码</summary>
