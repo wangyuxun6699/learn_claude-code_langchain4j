@@ -290,7 +290,6 @@ def complete_task(task_id: str) -> str:
         return message
 
 
-"""后台任务系统"""
 BackgroundStatus = Literal[
     "running",
     "completed",
@@ -774,10 +773,6 @@ def runtime_system_prompt(
     )
 
 
-# ============================================================
-# 文件与命令工具
-# ============================================================
-
 def safe_path(raw_path: str) -> Path:
     """解析工作区路径并阻止目录穿越。"""
     path = (WORKDIR / raw_path).resolve()
@@ -898,10 +893,6 @@ def run_write(
     except Exception as exc:
         return f"错误：{exc}"
 
-
-# ============================================================
-# Task System 工具包装
-# ============================================================
 
 @tool("create_task")
 def run_create_task(
@@ -1074,10 +1065,6 @@ TOOLS = [
 ]
 
 
-# ============================================================
-# LangChain Agent
-# ============================================================
-
 model = ChatOpenAI(
     model=MODEL_ID,
     api_key=OPENAI_API_KEY,
@@ -1098,10 +1085,6 @@ agent = create_agent(
     name="background_tasks",
 )
 
-
-# ============================================================
-# 流式打印与命令行循环
-# ============================================================
 
 def content_to_text(content: Any) -> str:
     """把 OpenAI-compatible 消息内容转成文本。"""
@@ -1202,8 +1185,6 @@ def agent_loop(
                 seen.add(key)
                 print_message(message)
     finally:
-        # 模型或工具失败时也保留已经产生的 LangGraph 状态，避免刚注入的
-        # 后台完成通知因本轮异常而从会话中丢失。
         if final_state is not None:
             session_state.clear()
             session_state.update(final_state)
