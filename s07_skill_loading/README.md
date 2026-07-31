@@ -18,7 +18,7 @@
 
 ![s07: Skill Loading — 按需加载专业知识](images/skill-overview.svg)
 
-启动时只扫描 `skills/*/SKILL.md` 的名称和描述；模型判断相关后，调用 `load_skill` 读取完整正文。
+启动时只扫描 `skills/*/SKILL.md` 的名称和描述；模型判断相关后，调用 `load_skill` 读取完整正文，随后注入system prompt。
 
 ---
 

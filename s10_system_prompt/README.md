@@ -74,7 +74,9 @@ python -m s10_system_prompt.code
 
 ## 接下来
 
-s11 为限流、过载、输出截断和上下文超限准备恢复策略。
+System prompt 可以运行时组装了，但 Agent 碰到错误还是会崩。网络抖动、API 限流、输出被截断、上下文超限，这些不是 bug，是常态。
+
+s11 Error Recovery → 四条恢复路径。升级 token、压缩上下文、指数退避、切换模型。
 
 <details>
 <summary>深入 CC 源码</summary>

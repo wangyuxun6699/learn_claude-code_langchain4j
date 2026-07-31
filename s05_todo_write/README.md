@@ -18,12 +18,14 @@
 
 ![s05: TodoWrite — 让 Agent 知道自己做到哪了](images/todo-overview.svg)
 
-LangChain 的 `TodoListMiddleware` 会注入 `write_todos` 工具并在 Agent state 中维护 todos；本章再把该状态打印到命令行。
+
+LangChain 的 `TodoListMiddleware` 会注入 `write_todos` 工具并在 Agent state 中维护 todos；本章再把该状态打印到命令行。同时对智能体进行强约束，要求它在动手之前必须先写todo列表,也就是强硬要求智能体进入plan模式，同时如果超过3轮没有查看计划，就给模型提示词做出引导。
 
 ---
 
 ## 工作原理：LangChain 版本
 
+注入todo
 ```python
 MIDDLEWARE = [
     user_prompt_submit,
@@ -42,8 +44,19 @@ agent = create_agent(model=MODEL, tools=TOOLS,
 result = agent.invoke({"messages": messages})
 todos = result.get("todos", [])
 ```
+设置强硬提醒
+```python
+global rounds_since_todo
 
-`code_streaming.py` 是原 s05.5：它改用 LangGraph streaming，按图步骤增量展示消息和 Todo。
+    if rounds_since_todo >= 3 and messages:
+        messages.append({
+            "role": "user",
+            "content": "<reminder>Update your todos with write_todos before continuing.</reminder>",
+        })
+        rounds_since_todo = 0
+```
+
+`code_streaming.py` 它用 LangGraph streaming，按图步骤增量展示消息和 Todo，而不是在干完活之后再把消息打印出来。
 
 ---
 
