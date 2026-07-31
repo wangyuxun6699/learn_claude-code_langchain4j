@@ -18,7 +18,7 @@
 
 ![s02: Tool Use — Agent 的手和脚](images/tool-dispatch.svg)
 
-用 LangChain 的 `@tool` 把 Python 函数变成带名称、描述和参数 schema 的工具，同时把所有文件路径限制在工作区内。
+用 LangChain 的 `@tool` 把 Python 函数变成带名称、描述和参数 schema 的工具，同时可以把所有文件路径限制在工作区内。
 
 ---
 
