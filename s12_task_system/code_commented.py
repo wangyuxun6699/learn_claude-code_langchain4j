@@ -15,7 +15,7 @@ s12：持久化任务系统（详细中文注释版）。
 任务通过 blockedBy 构成依赖图。claim_task 只有在全部依赖完成后才允许执行，
 complete_task 会持久化完成状态，并报告因此解锁的直接下游任务。
 
-LangChain 的 create_agent 会编译 LangGraph 工具循环，所以本章不再手写
+LangChain 的 create_agent 会编译 LangGraph 工具循环，所以本章不手写
 “模型调用—工具执行—结果回填—再次调用模型”的 while 循环。
 
 运行方式：python -m s12_task_system.code_commented
