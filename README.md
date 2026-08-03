@@ -30,9 +30,10 @@ result = agent.invoke({"messages": [{"role": "user", "content": query}]})
 
 ## 当前范围
 
-- s01～s11：已有 LangChain 实现；s11 已完成错误恢复 middleware 与 Agent 装配。
-- s12～s20：仅建立章节目录和空 `code.py`，等待后续实现。
-- 每章 README 的教学部分已替换为 LangChain 代码；折叠区“深入 CC 源码”保留参考仓库原文，方便对照真实 Claude Code Harness。
+- s01～s14：已有可运行的 LangChain 实现；最新完成的 s14 增加 Cron Scheduler、到期队列、自动交付和 durable 任务持久化。
+- s15～s20：已建立章节目录和占位 `code.py`，等待后续实现。
+- 已实现章节通常同时提供默认版、详细中文注释版和无教学行注释版，方便逐行学习或快速通读。
+- 各章沿用参考仓库的教学顺序，但代码以本仓库的 LangChain/LangGraph 实现为准，两者不会逐行等价。
 
 ## 快速开始
 
@@ -74,9 +75,9 @@ BASE_URL=https://your-openai-compatible-endpoint/v1
 | 09 | [s09: Memory](s09_memory/) | Markdown 长期记忆 | ✅ 已实现 |
 | 10 | [s10: System Prompt](s10_system_prompt/) | 动态 system prompt | ✅ 已实现 |
 | 11 | [s11: Error Recovery](s11_error_recovery/) | 截断续写、上下文恢复与退避降级 | ✅ 已实现 |
-| 12 | [s12: Task System](s12_task_system/) | 等待 LangChain 实现 | ⬜ 占位 |
-| 13 | [s13: Background Tasks](s13_background_tasks/) | 等待 LangChain 实现 | ⬜ 占位 |
-| 14 | [s14: Cron Scheduler](s14_cron_scheduler/) | 等待 LangChain 实现 | ⬜ 占位 |
+| 12 | [s12: Task System](s12_task_system/) | 持久任务、依赖与认领/完成状态 | ✅ 已实现 |
+| 13 | [s13: Background Tasks](s13_background_tasks/) | 后台命令、生命周期与完成通知 | ✅ 已实现 |
+| 14 | [s14: Cron Scheduler](s14_cron_scheduler/) | 五段式 Cron、持久化、到期队列与自动交付 | ✅ 已实现 |
 | 15 | [s15: Agent Teams](s15_agent_teams/) | 等待 LangChain 实现 | ⬜ 占位 |
 | 16 | [s16: Team Protocols](s16_team_protocols/) | 等待 LangChain 实现 | ⬜ 占位 |
 | 17 | [s17: Autonomous Agents](s17_autonomous_agents/) | 等待 LangChain 实现 | ⬜ 占位 |
@@ -95,12 +96,12 @@ learn_claude_code/
 │   ├── images/
 │   └── README.md
 ├── ...
-├── s11_error_recovery/
+├── s11_error_recovery/ ... s14_cron_scheduler/
 │   ├── code.py
 │   ├── code_commented.py
 │   ├── code_uncommented.py
 │   └── README.md
-├── s12_task_system/ ... s20_comprehensive/
+├── s15_agent_teams/ ... s20_comprehensive/
 │   ├── code.py              # 空占位
 │   └── README.md            # 状态说明
 ├── skills/                  # s07 可扫描的示例 Skills
@@ -108,7 +109,7 @@ learn_claude_code/
 └── requirements.txt
 ```
 
-已有章节中的 `code.py` 是主版本；`code_commented.py` 与 `code_uncommented.py` 分别适合逐行学习和快速通读。原来的 s03.5、s05.5 已分别归档为 `code_middleware.py` 与 `code_streaming.py`。
+已实现章节中的 `code.py` 是主版本；`code_commented.py` 与 `code_uncommented.py` 分别适合逐行学习和快速通读。原来的 s03.5、s05.5 已分别归档为 `code_middleware.py` 与 `code_streaming.py`。
 
 ## 说明与致谢
 
