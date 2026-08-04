@@ -380,6 +380,64 @@ with _prompt_cache_lock:
 
 另外，`update_context()` 在缓存判断之前执行，因此 `.memory/MEMORY.md` 仍会在每次模型调用前检查和读取。这样才能发现会话内刚写入的记忆。若记忆文件非常大，生产版本可以进一步按文件修改时间或内容哈希做两级缓存。
 
+
+### 与 ChatOpenAI、ChatAnthropic Prompt Cache 的关系
+
+本章的 `_last_context_key` / `_last_prompt` 是 LangChain 应用进程内的“Prompt 组装缓存”：命中后只跳过 Python 字符串拼接，模型调用仍然发生，完整 prompt 仍然会发送给模型供应商，因此它不会直接降低 API 输入 token 的计费。
+
+模型供应商的 **Prompt Cache** 位于更下游。它缓存的是模型已经处理过的稳定 prompt 前缀。命中后 API 仍会执行模型调用，但稳定前缀可以按缓存输入处理，从而降低延迟和输入成本。两层缓存可以同时存在：
+
+```text
+ModelRequest
+  → Dynamic Prompt middleware
+  → 本地组装缓存
+  → ChatModel
+  → 模型供应商 Prompt Cache
+  → 模型推理
+```
+
+LangChain 没有为所有模型提供完全统一的 Prompt Cache 协议。`ChatOpenAI` 和 `ChatAnthropic` 只是把相应的供应商参数转换并发送给下游 API，缓存实际存在哪里、怎样写入、保留多久以及如何计费，仍由最终连接的模型供应商决定。
+
+| 模型封装 | Prompt Cache 的典型行为 |
+|---|---|
+| `ChatOpenAI` + OpenAI 官方 API | 符合条件的长 prompt 默认参与自动缓存；缓存命中要求前缀精确一致。可以使用 `prompt_cache_key` 帮助相同业务前缀路由到同一缓存，但相同 key 不能让不同 prompt 强制命中。较新的模型还可能支持显式缓存断点。 |
+| `ChatAnthropic` + Anthropic 官方 API | 通常通过请求级 `cache_control` 开启自动缓存，或者在具体 content block 上设置 `cache_control` 作为显式断点。第一次请求写入缓存，后续相同前缀在 TTL 内读取缓存。 |
+| `ChatOpenAI` + OpenAI-compatible 第三方接口 | 是否支持 Prompt Cache、支持哪些参数及如何计费，完全取决于 `BASE_URL` 指向的供应商。使用 `ChatOpenAI` 类本身不代表一定使用 OpenAI 的缓存机制。 |
+| `ChatAnthropic` + Anthropic-compatible 第三方接口 | 同样需要由实际供应商实现 Anthropic 的缓存字段和语义，不能只根据 LangChain 类名判断。 |
+
+因此，本章的分段与确定性组装仍然很重要：固定 section 顺序、固定工具顺序、稳定序列化结果，可以让相同运行状态生成完全相同的 prompt，为供应商缓存命中创造条件。但“本地 prompt 缓存命中”与“供应商 Prompt Cache 命中”是两个独立事件：
+
+```text
+本地命中
+= context key 未变化
+= 复用已经组装好的字符串
+
+供应商命中
+= 到缓存断点为止的请求前缀精确一致
+= 复用服务端已经计算过的 prompt 前缀
+```
+
+为了提高供应商 Prompt Cache 的命中率，应把内容按照变化频率排列：
+
+```text
+稳定工具定义
+→ 稳定身份、安全规则和输出要求
+→ 稳定示例或项目文档
+→ 缓存边界
+→ 工作区状态、记忆、时间等动态信息
+→ 当前用户消息或最新工具结果
+```
+
+如果把时间戳、请求 ID、动态记忆或随机排序的工具放在稳定内容前面，前缀会频繁变化；即使本地组装缓存设计正确，供应商缓存也可能无法命中。
+
+还要注意，Prompt Cache 不等于对话记忆，也不会真正缩短上下文。缓存读取的 token 仍属于模型输入和上下文窗口，只是可能采用更低的缓存输入价格。真正减少上下文长度仍需要按需加载、裁剪工具结果、摘要或 compact。
+
+最后，还存在另一种不同机制：LangChain 的 LLM 响应缓存。它按照 prompt 和模型配置保存完整的 `Generation`；命中后可以直接返回旧回答，完全不调用模型。这适合结果稳定的 FAQ、翻译或分类任务，但不适合依赖实时文件、数据库和工具状态的 coding agent，否则可能返回过期结果并跳过必要的工具执行。
+
+而 LangChain 当前文档中的 OpenAI 显式 `prompt_cache_breakpoint` 需要 `langchain-openai>=1.3.5`。
+
+
+
 ### 缓存失效条件
 
 下面任一内容变化都会生成新的 key：
@@ -599,6 +657,7 @@ python -m s10_system_prompt.code_commented
 - 为最终 system message 建立快照测试，防止改动意外删除安全规则。
 
 ---
+> 本章的缓存优化分为两个层次：Dynamic Prompt 的本地缓存通过稳定的 context key 避免重复组装字符串；模型供应商的 Prompt Cache 则通过复用精确匹配的稳定输入前缀降低推理延迟和输入成本。`ChatOpenAI` 与 `ChatAnthropic` 的缓存参数并不通用，LangChain 只负责转发相应协议，最终行为取决于 `BASE_URL` 指向的实际供应商。因此，跨供应商都有效的优化原则不是依赖某个缓存参数，而是保持工具、System Prompt 和长文档前缀稳定，把记忆、时间、用户问题和工具结果等动态内容放在后面。总的来说`ChatOpenAI`只需保持传入消息前缀固定，厂商会自动进行prompt cache,为用户节省token
 
 ## 接下来
 
