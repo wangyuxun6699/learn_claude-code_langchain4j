@@ -30,8 +30,8 @@ result = agent.invoke({"messages": [{"role": "user", "content": query}]})
 
 ## 当前范围
 
-- s01～s14：已有可运行的 LangChain 实现；最新完成的 s14 增加 Cron Scheduler、到期队列、自动交付和 durable 任务持久化。
-- s15～s20：已建立章节目录和占位 `code.py`，等待后续实现。
+- s01～s15：已有可运行的 LangChain 实现；最新完成的 s15 使用 LangGraph 子图和 `Command` 实现 Lead/Teammate handoff。
+- s16～s20：已建立章节目录和占位 `code.py`，等待后续实现。
 - 已实现章节通常同时提供默认版、详细中文注释版和无教学行注释版，方便逐行学习或快速通读。
 - 各章沿用参考仓库的教学顺序，但代码以本仓库的 LangChain/LangGraph 实现为准，两者不会逐行等价。
 
@@ -78,7 +78,7 @@ BASE_URL=https://your-openai-compatible-endpoint/v1
 | 12 | [s12: Task System](s12_task_system/) | 持久任务、依赖与认领/完成状态 | ✅ 已实现 |
 | 13 | [s13: Background Tasks](s13_background_tasks/) | 后台命令、生命周期与完成通知 | ✅ 已实现 |
 | 14 | [s14: Cron Scheduler](s14_cron_scheduler/) | 五段式 Cron、持久化、到期队列与自动交付 | ✅ 已实现 |
-| 15 | [s15: Agent Teams](s15_agent_teams/) | 等待 LangChain 实现 | ⬜ 占位 |
+| 15 | [s15: Agent Teams](s15_agent_teams/) | Lead/Teammate 子图、共享状态与双向 handoff | ✅ 已实现 |
 | 16 | [s16: Team Protocols](s16_team_protocols/) | 等待 LangChain 实现 | ⬜ 占位 |
 | 17 | [s17: Autonomous Agents](s17_autonomous_agents/) | 等待 LangChain 实现 | ⬜ 占位 |
 | 18 | [s18: Worktree Isolation](s18_worktree_isolation/) | 等待 LangChain 实现 | ⬜ 占位 |

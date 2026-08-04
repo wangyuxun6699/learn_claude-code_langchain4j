@@ -56,9 +56,6 @@ def last_ai_message(state: TeamState)->AIMessage:
     raise ValueError("当前状态没有AImessage")
 
 
-# ============================================================
-# 工具调用追踪
-# ============================================================
 
 def _json_text(value: Any) -> str:
     """把工具参数和结果完整格式化为可读 JSON。"""
@@ -436,11 +433,6 @@ builder = StateGraph(TeamState)
 builder.add_node("lead",lead_agent)
 builder.add_node("teammate",teammate_agent)
 builder.add_edge(START, "lead")
-# 不添加 lead -> teammate 或 teammate -> lead 的固定边。
-# 路由完全由 assign_teammate/report_to_lead 返回的 Command 控制。
-#
-# 如果 Lead 直接生成最终回答，没有 Command，图自然结束。
-# 如果 Teammate 没调用 report_to_lead，图也会结束，因此 prompt 强制要求汇报。
 checkpointer = InMemorySaver()
 
 team_graph = builder.compile(checkpointer=checkpointer)
@@ -548,3 +540,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
