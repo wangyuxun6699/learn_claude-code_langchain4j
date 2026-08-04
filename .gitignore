@@ -30,3 +30,4 @@ Thumbs.db
 .tasks/
 
 schema.sql
+.scheduled_tasks.json
